@@ -145,7 +145,6 @@ CREATE TABLE IF NOT EXISTS posts (
 );
 CREATE INDEX IF NOT EXISTS posts_user_idx ON posts(user_id, created_at DESC);
 
-
 CREATE TABLE IF NOT EXISTS articles (
   id BIGSERIAL PRIMARY KEY,
   user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -169,9 +168,15 @@ CREATE TABLE IF NOT EXISTS messages (
   media_id BIGINT REFERENCES media(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   read_at TIMESTAMPTZ,
+  edited_at TIMESTAMPTZ,
+  sender_deleted_at TIMESTAMPTZ,
+  receiver_deleted_at TIMESTAMPTZ,
   CHECK (sender_id <> receiver_id),
   CHECK (COALESCE(LENGTH(TRIM(body)),0) > 0 OR media_id IS NOT NULL)
 );
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS edited_at TIMESTAMPTZ;
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS sender_deleted_at TIMESTAMPTZ;
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS receiver_deleted_at TIMESTAMPTZ;
 CREATE INDEX IF NOT EXISTS messages_pair_idx ON messages(sender_id, receiver_id, created_at);
 CREATE INDEX IF NOT EXISTS messages_receiver_idx ON messages(receiver_id, read_at);
 
@@ -205,12 +210,24 @@ CREATE TABLE IF NOT EXISTS group_posts (
 CREATE TABLE IF NOT EXISTS reports (
   id BIGSERIAL PRIMARY KEY,
   reporter_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
-  target_type TEXT NOT NULL CHECK(target_type IN ('user','post','message','group')),
+  target_type TEXT NOT NULL CHECK(target_type IN ('user','post','message','group','job')),
   target_id BIGINT NOT NULL,
   reason TEXT NOT NULL,
+  reason_code TEXT,
+  comment TEXT,
+  evidence_media_ids BIGINT[] NOT NULL DEFAULT '{}',
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','closed')),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+ALTER TABLE reports ADD COLUMN IF NOT EXISTS reason_code TEXT;
+ALTER TABLE reports ADD COLUMN IF NOT EXISTS comment TEXT;
+ALTER TABLE reports ADD COLUMN IF NOT EXISTS evidence_media_ids BIGINT[] NOT NULL DEFAULT '{}';
+ALTER TABLE reports ADD COLUMN IF NOT EXISTS metadata JSONB NOT NULL DEFAULT '{}'::jsonb;
+DO $$ BEGIN
+  ALTER TABLE reports DROP CONSTRAINT IF EXISTS reports_target_type_check;
+  ALTER TABLE reports ADD CONSTRAINT reports_target_type_check CHECK(target_type IN ('user','post','message','group','job'));
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 CREATE TABLE IF NOT EXISTS session (
   sid varchar NOT NULL COLLATE "default",
