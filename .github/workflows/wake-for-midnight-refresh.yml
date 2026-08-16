@@ -1,0 +1,19 @@
+name: Wake WORKROOM for midnight vacancy refresh
+
+on:
+  schedule:
+    # 00:00 Moscow = 21:00 UTC. Two warm-up pings help a sleeping free Render
+    # service be awake when the in-app midnight scheduler fires.
+    - cron: '40 20 * * *'
+    - cron: '55 20 * * *'
+  workflow_dispatch:
+
+jobs:
+  wake:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wake WORKROOM
+        run: |
+          curl --fail --silent --show-error --max-time 120 \
+            --retry 3 --retry-delay 10 \
+            https://workroom-forum.onrender.com/healthz
