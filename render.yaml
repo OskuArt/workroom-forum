@@ -32,6 +32,18 @@ services:
         value: 45
       - key: ARBEITNOW_IMPORT_PAGES
         value: 4
+      - key: HH_PERIOD_DAYS
+        value: 3
+      - key: HH_JOB_SEARCH_TERMS
+        value: "графический дизайнер,UI UX дизайнер,product designer,motion designer,иллюстратор,frontend developer,backend developer,fullstack developer,software engineer,product manager,маркетолог,performance marketing,gamedev,igaming,data analyst,AI engineer"
+      - key: INSTAGRAM_JOB_ACCOUNTS
+        value: "vacancy_design,simple_studio,beginit.indrive.ca"
+      - key: INSTAGRAM_VACANCY_PROFESSIONS
+        value: "graphic designer,ui designer,ux designer,product designer,motion designer,illustrator,frontend developer,backend developer,software engineer,product manager,marketing manager,performance marketer,game developer,igaming,data analyst,ai engineer,ai creator"
+      - key: INSTAGRAM_ACCESS_TOKEN
+        sync: false
+      - key: INSTAGRAM_IG_USER_ID
+        sync: false
 
 databases:
   - name: workroom-db
