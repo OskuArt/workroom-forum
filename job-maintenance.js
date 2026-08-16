@@ -1,6 +1,7 @@
 // Safe production maintenance for WORK//ROOM.
 // Vacancy acquisition now lives exclusively in vacancy-monitor.js.
-// This file only archives stale imported vacancies and keeps ADMIN_EMAIL admin.
+// This file only archives stale imported vacancies, keeps ADMIN_EMAIL admin,
+// and keeps normalized country values compatible with the existing location filter.
 
 const { Pool } = require('pg');
 
@@ -22,6 +23,14 @@ if (process.env.DATABASE_URL) {
           AND COALESCE(published_at,created_at) < NOW() - ($1::text || ' days')::interval
         RETURNING id
       `, [String(days)]);
+
+      // The current catalogue filter searches the location field. If a source only
+      // yielded a country, mirror it into location instead of inventing a city.
+      await pool.query(`
+        UPDATE jobs
+        SET location=country
+        WHERE COALESCE(location,'')='' AND COALESCE(country,'')<>''
+      `).catch(() => {});
 
       const adminEmail = String(process.env.ADMIN_EMAIL || '').trim().toLowerCase();
       if (adminEmail) await pool.query(`UPDATE users SET role='admin' WHERE LOWER(email)=LOWER($1)`, [adminEmail]);
