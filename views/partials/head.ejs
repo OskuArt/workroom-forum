@@ -3,8 +3,16 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="description" content="Профессиональная сеть, вакансии, CV и сообщества для digital-специалистов.">
+  <meta name="description" content="Профессиональная сеть, вакансии, CV и личный карьерный органайзер для digital-специалистов.">
+  <meta name="theme-color" content="#7b5cff">
   <title><%= title ? `${title} · ${siteName}` : siteName %></title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/polish.css">
 </head>
 <body>
+<% if (currentPath === '/') { %>
+  <div class="site-loader" data-site-loader aria-hidden="true">
+    <div class="loader-mark" aria-label="WORK//ROOM"><span>✦</span></div>
+  </div>
+<% } %>
