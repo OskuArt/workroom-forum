@@ -1,7 +1,8 @@
 // Safe production maintenance for WORK//ROOM.
 // Vacancy acquisition now lives exclusively in vacancy-monitor-v3.js.
 // This file archives stale imported vacancies, keeps ADMIN_EMAIL admin,
-// and retires legacy feeds only after the new multi-source catalogue is healthy.
+// retires legacy feeds only after the new multi-source catalogue is healthy,
+// and removes old Telegram digest cards that contained many vacancies at once.
 
 const { Pool } = require('pg');
 
@@ -24,14 +25,27 @@ if (process.env.DATABASE_URL) {
         RETURNING id
       `, [String(days)]);
 
+      // Previous versions could save a whole Telegram digest as one vacancy.
+      // v3 resolves every outbound vacancy link separately, so retire those old cards.
+      const digests = await pool.query(`
+        UPDATE jobs
+        SET is_active=FALSE,updated_at=NOW()
+        WHERE is_active=TRUE
+          AND source LIKE 'Telegram · %'
+          AND (
+            COALESCE(summary,'') ILIKE '%вакансии на сегодня%'
+            OR COALESCE(summary,'') ILIKE '%хотите опубликовать вакансию%'
+            OR COALESCE(description_html,'') ILIKE '%вакансии на сегодня%'
+          )
+        RETURNING id
+      `).catch(() => ({ rowCount:0 }));
+
       await pool.query(`
         UPDATE jobs
         SET location=country
         WHERE COALESCE(location,'')='' AND COALESCE(country,'')<>''
       `).catch(() => {});
 
-      // Telegram digests can now resolve into hirehi.ru/company/etc. primary pages,
-      // so count discovery metadata instead of relying only on the displayed source label.
       const primary = await pool.query(`
         SELECT COUNT(*)::int AS c FROM jobs
         WHERE is_active=TRUE AND (
@@ -57,6 +71,7 @@ if (process.env.DATABASE_URL) {
       if (adminEmail) await pool.query(`UPDATE users SET role='admin' WHERE LOWER(email)=LOWER($1)`, [adminEmail]);
 
       if (stale.rowCount) console.log(`[maintenance] archived ${stale.rowCount} vacancies older than ${days} days`);
+      if (digests.rowCount) console.log(`[maintenance] retired ${digests.rowCount} old Telegram digest cards`);
     } catch (err) {
       console.warn('[maintenance] skipped:', err.message);
     }
