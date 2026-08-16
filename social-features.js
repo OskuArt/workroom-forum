@@ -17,6 +17,7 @@ const migrationPromise = pool ? (async () => {
     ALTER TABLE messages ADD COLUMN IF NOT EXISTS edited_at TIMESTAMPTZ;
     ALTER TABLE messages ADD COLUMN IF NOT EXISTS sender_deleted_at TIMESTAMPTZ;
     ALTER TABLE messages ADD COLUMN IF NOT EXISTS receiver_deleted_at TIMESTAMPTZ;
+    ALTER TABLE messages ADD COLUMN IF NOT EXISTS shared_job_id BIGINT REFERENCES jobs(id) ON DELETE SET NULL;
 
     ALTER TABLE reports ADD COLUMN IF NOT EXISTS reason_code TEXT;
     ALTER TABLE reports ADD COLUMN IF NOT EXISTS comment TEXT;
@@ -26,7 +27,7 @@ const migrationPromise = pool ? (async () => {
     ALTER TABLE reports ADD CONSTRAINT reports_target_type_check
       CHECK(target_type IN ('user','post','message','group','job'));
   `);
-  console.log('[social] message controls + moderation schema ready');
+  console.log('[social] message controls + vacancy forwarding + moderation schema ready');
 })().catch(err => {
   console.error('[social] migration failed:', err.message);
   throw err;
@@ -143,6 +144,69 @@ function installRoutes(app) {
         await q('UPDATE messages SET receiver_deleted_at=NOW() WHERE id=$1', [id]);
       }
       res.json({ ok:true, id:String(id), scope });
+    } catch (err) { next(err); }
+  });
+
+  // Vacancy forwarding. Only accepted contacts are returned and accepted.
+  router.get('/api/jobs/:id/contacts', requireUser, async (req, res, next) => {
+    try {
+      await migrationPromise;
+      const job = (await q('SELECT id FROM jobs WHERE id=$1 AND is_active=TRUE', [Number(req.params.id)])).rows[0];
+      if (!job) return res.status(404).json({ error:'Вакансия не найдена.' });
+      const { rows } = await q(`
+        SELECT u.id,u.username,u.name,u.profession,u.avatar_media_id
+        FROM friendships f
+        JOIN users u ON u.id=CASE WHEN f.requester_id=$1 THEN f.addressee_id ELSE f.requester_id END
+        WHERE f.status='accepted'
+          AND (f.requester_id=$1 OR f.addressee_id=$1)
+          AND u.is_banned=FALSE
+          AND NOT EXISTS(
+            SELECT 1 FROM blocks b
+            WHERE (b.blocker_id=$1 AND b.blocked_id=u.id) OR (b.blocker_id=u.id AND b.blocked_id=$1)
+          )
+        ORDER BY LOWER(COALESCE(NULLIF(u.name,''),u.username))
+      `, [req.user.id]);
+      res.json({ contacts: rows.map(r => ({
+        id:String(r.id), username:r.username, name:r.name || `@${r.username}`,
+        profession:r.profession || '', avatarMediaId:r.avatar_media_id ? String(r.avatar_media_id) : null,
+      })) });
+    } catch (err) { next(err); }
+  });
+
+  router.post('/api/jobs/:id/share', requireUser, async (req, res, next) => {
+    try {
+      await migrationPromise;
+      const job = (await q('SELECT id,title,company FROM jobs WHERE id=$1 AND is_active=TRUE', [Number(req.params.id)])).rows[0];
+      if (!job) return res.status(404).json({ error:'Вакансия не найдена.' });
+      const ids = [...new Set((Array.isArray(req.body.userIds) ? req.body.userIds : [req.body.userId]).map(Number).filter(Number.isFinite))].slice(0, 20);
+      if (!ids.length) return res.status(400).json({ error:'Выберите контакт.' });
+
+      const { rows: allowed } = await q(`
+        SELECT u.id,u.username
+        FROM friendships f
+        JOIN users u ON u.id=CASE WHEN f.requester_id=$1 THEN f.addressee_id ELSE f.requester_id END
+        WHERE f.status='accepted'
+          AND (f.requester_id=$1 OR f.addressee_id=$1)
+          AND u.id=ANY($2::bigint[])
+          AND u.is_banned=FALSE
+          AND NOT EXISTS(
+            SELECT 1 FROM blocks b
+            WHERE (b.blocker_id=$1 AND b.blocked_id=u.id) OR (b.blocker_id=u.id AND b.blocked_id=$1)
+          )
+      `, [req.user.id, ids]);
+      if (!allowed.length) return res.status(403).json({ error:'Эти пользователи не входят в ваши контакты.' });
+
+      const body = `Вакансия: ${clean(job.title, 240)}\n${clean(job.company, 180)}`;
+      const sent = [];
+      for (const recipient of allowed) {
+        const { rows } = await q(`
+          INSERT INTO messages(sender_id,receiver_id,body,shared_job_id)
+          VALUES($1,$2,$3,$4)
+          RETURNING id,created_at
+        `, [req.user.id, recipient.id, body, job.id]);
+        sent.push({ userId:String(recipient.id), username:recipient.username, messageId:String(rows[0].id), createdAt:rows[0].created_at });
+      }
+      res.json({ ok:true, sent });
     } catch (err) { next(err); }
   });
 
