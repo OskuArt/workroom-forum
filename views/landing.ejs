@@ -74,9 +74,10 @@
     <% if (jobs.length) { %>
       <div class="grid two">
         <% jobs.forEach(job => { %>
-          <a class="card job-card hover" data-region="<%= jobRegion(job.location) %>" href="/jobs/<%= job.id %>">
+          <a class="card job-card hover" data-region="<%= jobRegion(`${job.location || ''} ${job.country || ''}`) %>" href="/jobs/<%= job.id %>">
             <div>
               <div class="row between"><div class="source"><%= job.featured ? '★ ' : '' %><%= job.source %></div><% if(job.application_status){ %><span class="status-chip status-<%= job.application_status %>"><%= applicationStatusLabels[job.application_status] %></span><% } %></div>
+              <% if(job.published_at){ %><div class="job-card-date">опубликовано <%= new Date(job.published_at).toLocaleDateString('ru-RU') %></div><% } %>
               <h3 class="h3"><%= job.title %></h3><div><strong><%= job.company %></strong></div>
               <p class="summary"><%= job.summary_ru || job.summary || 'Откройте вакансию, чтобы посмотреть детали.' %></p>
               <div class="job-meta">
@@ -84,6 +85,7 @@
                 <% if(job.work_mode){ %><span class="tag tag-mode"><%= job.work_mode %></span><% } %>
                 <% if(job.salary){ %><span class="tag tag-salary"><%= job.salary %></span><% } %>
                 <% if(job.location){ %><span class="tag tag-location"><%= job.location %></span><% } %>
+                <% if(job.country && job.country!==job.location){ %><span class="tag tag-location"><%= job.country %></span><% } %>
                 <% if(job.sector){ %><span class="tag tag-sector"><%= job.sector %></span><% } %>
               </div>
             </div>
