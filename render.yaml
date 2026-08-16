@@ -4,7 +4,7 @@ services:
     runtime: node
     plan: free
     buildCommand: npm install
-    startCommand: node -r ./brevo-fetch-shim.js server.js
+    startCommand: node -r ./brevo-fetch-shim.js -r ./job-maintenance.js server.js
     healthCheckPath: /healthz
     autoDeployTrigger: commit
     envVars:
@@ -28,6 +28,8 @@ services:
         value: true
       - key: JOB_IMPORT_INTERVAL_HOURS
         value: 6
+      - key: JOB_MAX_AGE_DAYS
+        value: 45
       - key: ARBEITNOW_IMPORT_PAGES
         value: 4
 
