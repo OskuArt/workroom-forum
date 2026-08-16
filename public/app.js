@@ -26,7 +26,18 @@
     div.dataset.messageId = m.id;
     div.dataset.mine = mine ? '1' : '0';
 
-    if (m.body) {
+    if (m.shared_job_id) {
+      const card = document.createElement('a');
+      card.className = 'shared-job-message';
+      card.href = `/jobs/${m.shared_job_id}`;
+      const kicker = document.createElement('span');
+      kicker.className = 'shared-job-kicker';
+      kicker.textContent = 'ВАКАНСИЯ ↗';
+      const title = document.createElement('strong');
+      title.textContent = m.body || 'Открыть вакансию';
+      card.append(kicker, title);
+      div.appendChild(card);
+    } else if (m.body) {
       const text = document.createElement('div');
       text.className = 'bubble-main';
       text.textContent = m.body;
@@ -41,7 +52,7 @@
     if (mine) {
       const actions = document.createElement('div');
       actions.className = 'bubble-actions';
-      if (m.body) {
+      if (m.body && !m.shared_job_id) {
         const edit = document.createElement('button');
         edit.type = 'button'; edit.className = 'bubble-action'; edit.dataset.messageEdit = ''; edit.title = 'Редактировать'; edit.textContent = '✎';
         actions.appendChild(edit);
@@ -172,6 +183,91 @@
       if (!document.hidden) markConversationRead().then(refreshReceipts);
     });
   }
+
+  // Vacancy sharing: accepted contacts are loaded only when the panel opens.
+  document.querySelectorAll('[data-job-share]').forEach((panel) => {
+    const jobId = panel.dataset.jobId;
+    const strip = panel.querySelector('[data-job-share-contacts]');
+    const status = panel.querySelector('[data-job-share-status]');
+    let loaded = false;
+
+    const renderContacts = (contacts) => {
+      strip.innerHTML = '';
+      if (!contacts.length) {
+        const empty = document.createElement('div');
+        empty.className = 'contact-strip-empty';
+        empty.textContent = 'В контактах пока никого нет.';
+        strip.appendChild(empty);
+        return;
+      }
+      contacts.forEach((contact) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'share-contact';
+        button.dataset.shareContact = contact.id;
+        button.title = `Отправить @${contact.username}`;
+
+        if (contact.avatarMediaId) {
+          const img = document.createElement('img');
+          img.src = `/media/${contact.avatarMediaId}`;
+          img.alt = '';
+          button.appendChild(img);
+        } else {
+          const avatar = document.createElement('span');
+          avatar.className = 'share-contact-avatar';
+          avatar.textContent = '@';
+          button.appendChild(avatar);
+        }
+        const name = document.createElement('strong');
+        name.textContent = contact.name || `@${contact.username}`;
+        const nick = document.createElement('span');
+        nick.textContent = `@${contact.username}`;
+        button.append(name, nick);
+        if (contact.profession) {
+          const profession = document.createElement('small');
+          profession.textContent = contact.profession;
+          button.appendChild(profession);
+        }
+        strip.appendChild(button);
+      });
+    };
+
+    const load = async () => {
+      if (loaded || !jobId) return;
+      loaded = true;
+      try {
+        const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}/contacts`, { headers:{ 'X-Requested-With':'fetch' } });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Не удалось загрузить контакты.');
+        renderContacts(data.contacts || []);
+      } catch (err) {
+        loaded = false;
+        strip.innerHTML = `<div class="contact-strip-empty"></div>`;
+        strip.firstElementChild.textContent = err.message;
+      }
+    };
+
+    panel.addEventListener('toggle', () => { if (panel.open) load(); });
+    strip?.addEventListener('click', async (event) => {
+      const button = event.target.closest('[data-share-contact]');
+      if (!button || button.disabled) return;
+      button.disabled = true;
+      status.textContent = 'Отправляю…';
+      try {
+        const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}/share`, {
+          method:'POST', headers:{ 'Content-Type':'application/json' }, body:JSON.stringify({ userId:button.dataset.shareContact }),
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Не удалось переслать вакансию.');
+        button.classList.add('is-sent');
+        button.title = 'Вакансия отправлена';
+        status.textContent = `Отправлено @${data.sent?.[0]?.username || ''} ✓`;
+      } catch (err) {
+        button.disabled = false;
+        status.textContent = err.message;
+      }
+    });
+  });
 
   const customSelects = [];
   document.querySelectorAll('select.custom-select').forEach((select, index) => {
