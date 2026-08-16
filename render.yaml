@@ -47,10 +47,11 @@ services:
         value: "mirkreatorovjob,designhunters,jun_hi_vacancies,serbia_vacancies,rabotavserbii,desivr_design"
 
       # Instagram: partner accounts + rotating multilingual vacancy hashtags.
+      # Four new hashtags/day stays below the rolling unique-hashtag allowance.
       - key: INSTAGRAM_JOB_ACCOUNTS
         value: "vacancy_design,simple_studio,beginit.indrive.ca"
       - key: INSTAGRAM_HASHTAG_BUDGET
-        value: 24
+        value: 4
       - key: INSTAGRAM_ACCESS_TOKEN
         sync: false
       - key: INSTAGRAM_IG_USER_ID
