@@ -1,27 +1,62 @@
 <%- include('../partials/head') %><%- include('../partials/nav') %>
 <main class="container section">
-  <section class="card <%= profile.open_to_work ? 'acid' : '' %>">
+  <section class="card profile-hero-card <%= profile.open_to_work ? 'acid' : '' %>">
     <div class="profile-head">
       <% if(profile.avatar_media_id){ %><img class="avatar xl" src="/media/<%= profile.avatar_media_id %>" alt=""><% } else { %><div class="avatar xl placeholder">@</div><% } %>
-      <div><div class="eyebrow"><%= profile.open_to_work ? 'open to work' : 'member' %></div><h1 class="profile-name"><%= profile.name || `@${profile.username}` %></h1><p class="lead">@<%= profile.username %> · <%= profile.profession || 'Digital specialist' %><% if(profile.location){ %> · <%= profile.location %><% } %></p><p><%= profile.bio || 'Пока без описания.' %></p></div>
+      <div>
+        <div class="eyebrow"><%= profile.open_to_work ? 'open to work' : 'member' %></div>
+        <h1 class="profile-name"><%= profile.name || `@${profile.username}` %></h1>
+        <p class="lead">@<%= profile.username %><% if(profile.profession){ %> · <%= profile.profession %><% } %><% if(profile.location){ %> · <%= profile.location %><% } %></p>
+        <% if(profile.bio){ %><p class="profile-bio"><%= profile.bio %></p><% } %>
+      </div>
       <div class="row">
-        <% if(owner){ %><a class="pill black" href="/settings/profile">Редактировать</a><a class="pill" href="/my/cv">Мои CV</a><% } else if(user){ %>
+        <% if(owner){ %>
+          <a class="pill black" href="/settings/profile">Редактировать</a>
+          <a class="pill" href="/my/cv">Мои CV</a>
+        <% } else if(user){ %>
           <a class="pill black" href="/messages/<%= profile.username %>">Написать</a>
-          <% if(!friendship){ %><form method="post" action="/u/<%= profile.username %>/friend"><button class="pill" type="submit">Добавить в контакты</button></form><% } else if(friendship.status==='pending' && Number(friendship.addressee_id)===Number(user.id)){ %><form method="post" action="/friends/<%= friendship.id %>/accept"><button class="pill acid" type="submit">Принять запрос</button></form><% } else if(friendship.status==='accepted'){ %><form method="post" action="/friends/<%= friendship.id %>/remove"><button class="pill" type="submit">Удалить контакт</button></form><% } else { %><span class="tag">Запрос отправлен</span><% } %>
+          <% if(!friendship){ %><form method="post" action="/u/<%= profile.username %>/friend"><button class="pill" type="submit">Добавить в контакты</button></form>
+          <% } else if(friendship.status==='pending' && Number(friendship.addressee_id)===Number(user.id)){ %><form method="post" action="/friends/<%= friendship.id %>/accept"><button class="pill acid" type="submit">Принять запрос</button></form>
+          <% } else if(friendship.status==='accepted'){ %><form method="post" action="/friends/<%= friendship.id %>/remove"><button class="pill" type="submit">Удалить контакт</button></form>
+          <% } else { %><span class="tag">Запрос отправлен</span><% } %>
         <% } else { %><a class="pill black" href="/login">Войти, чтобы написать</a><% } %>
       </div>
     </div>
   </section>
 
   <section class="section profile-layout">
-    <aside class="stack">
-      <div class="card"><div class="eyebrow">contacts</div><div class="contact-list"><% if(profile.tg){ %><div><strong>TG</strong> <%= profile.tg %></div><% } %><% if(profile.vk){ %><a href="<%= profile.vk %>" target="_blank" rel="noopener noreferrer"><strong>LINK</strong> <%= profile.vk %></a><% } %><% if(profile.phone){ %><div><strong>PHONE</strong> <%= profile.phone %></div><% } %><% if(profile.contact_email){ %><div><strong>MAIL</strong> <%= profile.contact_email %></div><% } %></div></div>
+    <aside class="stack profile-sidebar">
+      <div class="card">
+        <div class="eyebrow">contacts</div>
+        <div class="contact-list">
+          <% if(profile.tg){ %><div><strong>TG</strong> <%= profile.tg %></div><% } %>
+          <% if(profile.vk){ %><a href="<%= profile.vk %>" target="_blank" rel="noopener noreferrer"><strong>LINK</strong> <%= profile.vk %></a><% } %>
+          <% if(profile.phone){ %><div><strong>PHONE</strong> <%= profile.phone %></div><% } %>
+          <% if(profile.contact_email){ %><div><strong>MAIL</strong> <%= profile.contact_email %></div><% } %>
+          <% if(!profile.tg && !profile.vk && !profile.phone && !profile.contact_email){ %><span class="muted">Контакты пока не указаны.</span><% } %>
+        </div>
+      </div>
       <div class="card violet"><div class="eyebrow">CV</div><div class="metric"><%= cvs.length %></div><p><%= owner ? 'всего в вашем кабинете' : 'опубликовано' %></p></div>
-      <% if(user && !owner){ %><form class="card stack" method="post" action="/report"><input type="hidden" name="target_type" value="user"><input type="hidden" name="target_id" value="<%= profile.id %>"><label class="smalltext"><strong>Пожаловаться</strong></label><input class="input" name="reason" placeholder="Причина" required><button class="pill small" type="submit">Отправить</button></form><% } %>
+      <% if(user && !owner){ %>
+        <form class="card stack" method="post" action="/report">
+          <input type="hidden" name="target_type" value="user"><input type="hidden" name="target_id" value="<%= profile.id %>">
+          <label class="smalltext"><strong>Пожаловаться на профиль</strong></label>
+          <input class="input" name="reason" placeholder="Коротко опишите причину" required>
+          <button class="pill small" type="submit">Отправить</button>
+        </form>
+      <% } %>
     </aside>
-    <div class="stack">
-      <div class="row between"><div><div class="eyebrow">CV</div><h2 class="h2">Резюме</h2></div></div>
-      <% if(cvs.length){ %><div class="grid two"><% cvs.forEach(cv=>{ %><a class="card hover cv-card" href="<%= cv.status==='published' ? `/cv/${cv.id}` : `/my/cv/${cv.id}/edit` %>"><div><div class="status <%= cv.status %>"><%= cv.status %></div><h3 class="h3"><%= cv.title %></h3><div class="muted">обновлено <%= new Date(cv.updated_at).toLocaleDateString('ru-RU') %></div></div><div class="view-counter">◉ <%= cv.views %></div></a><% }) %></div><% } else { %><div class="empty">Здесь пока нет опубликованных CV.</div><% } %>
+
+    <div class="stack profile-main">
+      <div><div class="eyebrow">CV</div><h2 class="h2">Резюме</h2></div>
+      <% if(cvs.length){ %>
+        <div class="grid two"><% cvs.forEach(cv=>{ %>
+          <a class="card hover cv-card" href="<%= cv.status==='published' ? `/cv/${cv.id}` : `/my/cv/${cv.id}/edit` %>">
+            <div><div class="status <%= cv.status %>"><%= cv.status %></div><h3 class="h3"><%= cv.title %></h3><div class="muted">обновлено <%= new Date(cv.updated_at).toLocaleDateString('ru-RU') %></div></div>
+            <div class="view-counter">◉ <%= cv.views %></div>
+          </a>
+        <% }) %></div>
+      <% } else { %><div class="empty">Здесь пока нет опубликованных CV.</div><% } %>
     </div>
   </section>
 </main>
