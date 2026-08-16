@@ -4,7 +4,7 @@ services:
     runtime: node
     plan: free
     buildCommand: npm install
-    startCommand: npm start
+    startCommand: node -r ./brevo-fetch-shim.js server.js
     healthCheckPath: /healthz
     autoDeployTrigger: commit
     envVars:
@@ -20,9 +20,9 @@ services:
         value: WORK//ROOM
       - key: ADMIN_EMAIL
         sync: false
-      - key: RESEND_API_KEY
+      - key: BREVO_API_KEY
         sync: false
-      - key: RESEND_FROM
+      - key: BREVO_FROM_EMAIL
         sync: false
       - key: ENABLE_JOB_IMPORT
         value: true
