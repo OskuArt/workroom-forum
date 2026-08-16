@@ -4,7 +4,7 @@ services:
     runtime: node
     plan: free
     buildCommand: npm install
-    startCommand: node -r ./brevo-fetch-shim.js -r ./vacancy-monitor-v3.js -r ./hh-bulk-import.js -r ./vacancy-quality.js -r ./job-maintenance.js -r ./ban-system.js -r ./social-features.js -r ./presence-system.js -r ./jobs-catalogue.js server.js
+    startCommand: node -r ./brevo-fetch-shim.js -r ./vacancy-monitor-v3.js -r ./hh-bulk-import.js -r ./source-watchdog.js -r ./telegram-public-import.js -r ./vacancy-quality.js -r ./job-maintenance.js -r ./ban-system.js -r ./social-features.js -r ./presence-system.js -r ./jobs-catalogue.js server.js
     healthCheckPath: /healthz
     autoDeployTrigger: commit
     envVars:
@@ -36,25 +36,30 @@ services:
       - key: JOBS_PER_PAGE
         value: 120
 
-      # hh.ru multilingual role monitoring + broad depth pool.
+      # hh.ru: deeper multilingual role monitoring and an automatic watchdog retry.
       - key: HH_PERIOD_DAYS
-        value: 3
+        value: 7
       - key: HH_QUERY_LIMIT
-        value: 80
+        value: 120
       - key: HH_DETAIL_LIMIT
-        value: 360
+        value: 520
       - key: HH_BULK_TARGET
-        value: 1400
+        value: 2000
       - key: HH_BULK_PAGES
-        value: 2
+        value: 4
+      - key: HH_JOB_SEARCH_TERMS
+        value: "графический дизайнер,бренд-дизайнер,веб-дизайнер,моушн дизайнер,иллюстратор,арт-директор,UI UX дизайнер,product designer,frontend developer,backend developer,fullstack developer,software engineer,DevOps engineer,QA engineer,data analyst,data engineer,data scientist,AI engineer,product manager,project manager,маркетолог,performance marketing,SMM manager,CRM manager,PR manager,SEO specialist,content manager,copywriter,content creator,creative producer,IT recruiter,game designer,game developer,unity developer,unreal developer,igaming"
 
-      # Telegram: digest posts are opened link-by-link; primary job pages become the stored source.
+      # Telegram approved public channels. Initial backlog is read from public channel previews;
+      # a bot token can additionally provide live channel_post updates later.
       - key: TELEGRAM_JOB_CHANNELS
         value: "mirkreatorovjob,designhunters,jun_hi_vacancies,serbia_vacancies,rabotavserbii,desivr_design"
 
-      # Instagram: partner accounts + rotating multilingual vacancy hashtags.
+      # Instagram: approved accounts + profession-vacancy hashtag discovery.
       - key: INSTAGRAM_JOB_ACCOUNTS
         value: "vacancy_design,simple_studio,beginit.indrive.ca"
+      - key: INSTAGRAM_VACANCY_PROFESSIONS
+        value: "graphic designer,brand designer,web designer,ui designer,ux designer,product designer,motion designer,illustrator,art director,frontend developer,backend developer,fullstack developer,software engineer,devops engineer,qa engineer,data analyst,data engineer,data scientist,ai engineer,product manager,project manager,marketing manager,performance marketer,smm manager,crm manager,pr manager,seo specialist,content manager,copywriter,content creator,creative producer,it recruiter,game designer,game developer,unity developer,unreal developer,igaming"
       - key: INSTAGRAM_HASHTAG_BUDGET
         value: 4
       - key: INSTAGRAM_ACCESS_TOKEN
