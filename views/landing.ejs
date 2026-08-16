@@ -52,15 +52,19 @@
   </section>
 
   <section class="container job-refresh-section">
-    <div class="card violet job-refresh-card">
-      <div>
-        <div class="eyebrow">daily job refresh</div>
-        <h2 class="h2">НОВЫЕ ВАКАНСИИ КАЖДЫЙ ДЕНЬ В 00:00 МСК</h2>
-        <p class="lead">Мы пересобираем каталог, поднимаем свежие позиции и архивируем устаревшие.</p>
+    <div class="job-refresh-card">
+      <div class="refresh-copy">
+        <div class="eyebrow">DAILY JOB REFRESH ✦ 00:00 MSK</div>
+        <h2 class="refresh-title">НОВЫЕ ВАКАНСИИ<br>КАЖДЫЙ ДЕНЬ</h2>
+        <p>Свежие позиции поднимаются наверх, устаревшие уходят в архив автоматически.</p>
       </div>
-      <div class="refresh-clock">
-        <span class="refresh-clock-label">до следующего обновления</span>
-        <strong data-job-refresh-timer>00:00:00</strong>
+      <div class="refresh-clock" aria-live="polite">
+        <div class="refresh-clock-top">
+          <span class="refresh-clock-label">ДО СЛЕДУЮЩЕГО ОБНОВЛЕНИЯ</span>
+          <span class="refresh-clock-mark">✦</span>
+        </div>
+        <strong data-job-refresh-timer>--:--:--</strong>
+        <span class="refresh-clock-foot">МОСКОВСКОЕ ВРЕМЯ / UTC+3</span>
       </div>
     </div>
   </section>
