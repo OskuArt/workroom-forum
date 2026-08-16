@@ -1,7 +1,7 @@
 // Safe production maintenance for WORK//ROOM.
-// Vacancy acquisition now lives exclusively in vacancy-monitor.js.
-// This file only archives stale imported vacancies, keeps ADMIN_EMAIL admin,
-// and keeps normalized country values compatible with the existing location filter.
+// Vacancy acquisition now lives exclusively in vacancy-monitor-v3.js.
+// This file archives stale imported vacancies, keeps ADMIN_EMAIL admin,
+// and retires legacy feeds only after the new multi-source catalogue is healthy.
 
 const { Pool } = require('pg');
 
@@ -24,20 +24,24 @@ if (process.env.DATABASE_URL) {
         RETURNING id
       `, [String(days)]);
 
-      // The current catalogue filter searches the location field. If a source only
-      // yielded a country, mirror it into location instead of inventing a city.
       await pool.query(`
         UPDATE jobs
         SET location=country
         WHERE COALESCE(location,'')='' AND COALESCE(country,'')<>''
       `).catch(() => {});
 
-      // Transition away from the previous Jobicy/Arbeitnow/direct-ATS experiment
-      // only after the new hh/Telegram/Instagram pipeline has enough inventory.
+      // Telegram digests can now resolve into hirehi.ru/company/etc. primary pages,
+      // so count discovery metadata instead of relying only on the displayed source label.
       const primary = await pool.query(`
         SELECT COUNT(*)::int AS c FROM jobs
-        WHERE is_active=TRUE AND (source='hh.ru' OR source LIKE 'Telegram · %' OR source LIKE 'Instagram%')
-      `);
+        WHERE is_active=TRUE AND (
+          source='hh.ru'
+          OR source LIKE 'Instagram%'
+          OR source LIKE 'Telegram · %'
+          OR COALESCE(source_metadata->>'discovered_via','')='telegram'
+        )
+      `).catch(() => ({ rows:[{ c:0 }] }));
+
       if (Number(primary.rows[0]?.c || 0) >= 20) {
         const retired = await pool.query(`
           UPDATE jobs SET is_active=FALSE,updated_at=NOW()
@@ -59,8 +63,6 @@ if (process.env.DATABASE_URL) {
   }
 
   setTimeout(maintain, 12_000).unref();
-  // vacancy-monitor starts shortly after boot, so run a second normalization pass
-  // once its first batch has had time to land in PostgreSQL.
   setTimeout(maintain, 4 * 60 * 1000).unref();
   setInterval(maintain, 60 * 60 * 1000).unref();
   process.on('exit', () => pool.end().catch(() => {}));
