@@ -1,0 +1,20 @@
+<header class="topbar">
+  <a class="brand" href="/" aria-label="Главная"><span class="brand-dot">✦</span><%= siteName %></a>
+  <nav class="navlinks" aria-label="Основная навигация">
+    <a class="nav-jobs <%= currentPath.startsWith('/jobs') ? 'active' : '' %>" href="/jobs">Вакансии</a>
+    <a class="nav-people <%= currentPath.startsWith('/people') ? 'active' : '' %>" href="/people">Люди<% if (pendingFriendCount) { %><span class="badge"><%= pendingFriendCount %></span><% } %></a>
+    <a class="nav-messages <%= currentPath.startsWith('/messages') ? 'active' : '' %>" href="/messages">Сообщения<% if (user && unreadCount) { %><span class="badge"><%= unreadCount %></span><% } %></a>
+    <a class="nav-work <%= currentPath.startsWith('/applications') || currentPath.startsWith('/my/cv') ? 'active' : '' %>" href="/applications">Моя работа</a>
+  </nav>
+  <div class="nav-actions">
+    <% if (user) { %>
+      <% if (user.role === 'admin') { %><a class="icon-btn" href="/admin" title="Админ">A</a><% } %>
+      <a class="pill small" href="<%= user.username ? `/u/${user.username}` : '/settings/profile' %>"><%= user.username ? `@${user.username}` : 'Профиль' %></a>
+      <form action="/logout" method="post"><button class="link-btn" type="submit">Выйти</button></form>
+    <% } else { %>
+      <a class="link-btn" href="/login">Войти</a>
+      <a class="pill small acid" href="/register">Регистрация ↗</a>
+    <% } %>
+  </div>
+</header>
+<% if (flash) { %><div class="flash <%= flash.type %>"><%= flash.message %></div><% } %>

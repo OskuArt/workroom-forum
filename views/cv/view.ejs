@@ -1,0 +1,5 @@
+<%- include('../partials/head') %><%- include('../partials/nav') %>
+<main class="container section"><div class="cv-sheet"><div class="row between align-start"><div><div class="eyebrow">CV / <%= cv.status %></div><h1 class="h1"><%= cv.title %></h1><a href="/u/<%= cv.username %>"><strong><%= cv.name || `@${cv.username}` %></strong> · @<%= cv.username %></a><p><%= cv.profession || '' %><%= cv.location ? ` · ${cv.location}` : '' %></p></div><div class="view-counter">◉ <span data-cv-counter="<%= cv.id %>"><%= views %></span></div></div>
+<% [['О себе',cv.summary],['Опыт',cv.experience],['Навыки',cv.skills],['Программы',cv.programs],['Образование',cv.education],['Курсы',cv.courses],['Портфолио',cv.portfolio_links]].forEach(([label,value])=>{ if(value){ %><section class="cv-block"><div class="eyebrow"><%= label %></div><div class="preline"><%= value %></div></section><% } }) %>
+<% if(owner){ %><div class="cv-block"><a class="pill black" href="/my/cv/<%= cv.id %>/edit">Редактировать</a></div><% } %></div></main>
+<%- include('../partials/footer') %>

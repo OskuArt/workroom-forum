@@ -1,0 +1,86 @@
+<%- include('partials/head') %>
+<%- include('partials/nav') %>
+<main>
+  <section class="hero container">
+    <div class="hero-shell">
+      <div class="hero-top"><h1 class="display hero-wordmark">WORK. MAKE. TALK. REPEAT.</h1></div>
+      <div class="hero-grid">
+        <div class="hero-main">
+          <div>
+            <div class="eyebrow">professional network / jobs / community</div>
+            <div class="bigcopy hero-lines">
+              <span>Найди работу.</span>
+              <span>Покажи, что умеешь.</span>
+              <span>Найди своих.</span>
+            </div>
+          </div>
+          <div class="row between">
+            <div class="lead">Вакансии, несколько CV, личный карьерный трекер и сообщения в одном месте.</div>
+            <a class="arrow" href="<%= user ? '/jobs' : '/register' %>" aria-label="Начать">→</a>
+          </div>
+        </div>
+        <div class="hero-side">
+          <a class="card violet hover" href="/jobs"><div><div class="eyebrow">01</div><h2 class="h2">ВАКАНСИИ</h2></div><span class="arrow light">→</span></a>
+          <a class="card orange hover" href="/people"><div><div class="eyebrow">02</div><h2 class="h2">ЛЮДИ</h2></div><span class="arrow">→</span></a>
+          <a class="card blue hover" href="/messages"><div><div class="eyebrow">03</div><h2 class="h2 hero-message-title">СООБЩЕНИЯ</h2></div><span class="arrow">→</span></a>
+          <a class="card acid hover" href="/applications"><div><div class="eyebrow">04</div><h2 class="h2">МОЯ РАБОТА</h2></div><span class="arrow">→</span></a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="marquee"><div class="marquee-track">JOBS ✦ CV ✦ DESIGN ✦ CODE ✦ IGAMING ✦ MARKETING ✦ PRODUCT ✦ MOTION ✦ CREATOR ECONOMY ✦ JOBS ✦ CV ✦ DESIGN ✦ CODE ✦ IGAMING ✦ MARKETING ✦ PRODUCT ✦ MOTION ✦ CREATOR ECONOMY ✦ </div></div>
+
+  <section class="section container">
+    <div class="grid four numbered-benefits">
+      <div class="card black"><div class="metric">01</div><p>Создай профиль и уникальный @ник.</p></div>
+      <div class="card pink"><div class="metric">02</div><p>Собирай несколько CV под разные роли.</p></div>
+      <div class="card mint"><div class="metric">03</div><p>Смотри, сколько людей открыли каждое CV.</p></div>
+      <div class="card yellow"><div class="metric">04</div><p>Храни отклики, интервью и отказы в одном месте.</p></div>
+    </div>
+  </section>
+
+  <section class="section container">
+    <div class="row between align-start"><div><div class="eyebrow">fresh jobs</div><h2 class="h1">Найди работу без<br>лишних заморочек</h2></div><a class="pill black" href="/jobs">Все вакансии →</a></div>
+    <% if (jobs.length) { %>
+      <div class="grid two">
+        <% jobs.forEach(job => { %>
+          <a class="card job-card hover" href="/jobs/<%= job.id %>">
+            <div>
+              <div class="row between"><div class="source"><%= job.featured ? '★ ' : '' %><%= job.source %></div><% if(job.application_status){ %><span class="status-chip status-<%= job.application_status %>"><%= applicationStatusLabels[job.application_status] %></span><% } %></div>
+              <h3 class="h3"><%= job.title %></h3><div><strong><%= job.company %></strong></div>
+              <p class="summary"><%= job.summary_ru || job.summary || 'Откройте вакансию, чтобы посмотреть детали.' %></p>
+              <div class="job-meta">
+                <% if(job.experience){ %><span class="tag tag-experience"><%= job.experience %></span><% } %>
+                <% if(job.work_mode){ %><span class="tag tag-mode"><%= job.work_mode %></span><% } %>
+                <% if(job.salary){ %><span class="tag tag-salary"><%= job.salary %></span><% } %>
+                <% if(job.location){ %><span class="tag tag-location"><%= job.location %></span><% } %>
+                <% if(job.sector){ %><span class="tag tag-sector"><%= job.sector %></span><% } %>
+              </div>
+            </div>
+            <span class="arrow">→</span>
+          </a>
+        <% }) %>
+      </div>
+    <% } else { %><div class="empty">Вакансии импортируются. Обновите страницу чуть позже.</div><% } %>
+  </section>
+
+  <section class="section container">
+    <div class="card black career-focus">
+      <div class="eyebrow">your career desk</div>
+      <h2 class="display medium">НЕ ТЕРЯЙ ОТКЛИКИ.</h2>
+      <p class="lead">Личный органайзер откликов на вакансии уже ждет тебя после регистрации!</p>
+      <a class="pill acid" href="<%= user ? '/applications' : '/register' %>">Открыть карьерный центр →</a>
+    </div>
+  </section>
+
+  <section class="section container">
+    <div class="card yellow">
+      <div class="grid two">
+        <div><div class="eyebrow">for employers</div><h2 class="display medium">НУЖЕН ЧЕЛОВЕК?</h2></div>
+        <div class="stack"><p class="lead">Разместите вакансию с отдельным выделением на площадке. Для старта публикации проходят через администратора.</p><a class="pill black" href="/employers">Разместить вакансию →</a></div>
+      </div>
+    </div>
+  </section>
+</main>
+<%- include('partials/footer') %>

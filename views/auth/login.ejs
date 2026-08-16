@@ -1,0 +1,5 @@
+<%- include('../partials/head') %><%- include('../partials/nav') %>
+<main class="form-shell"><div class="card violet"><div class="eyebrow">welcome back</div><h1 class="h1">Войти</h1>
+<form class="form-grid" method="post" action="/login"><div class="field"><label>Почта</label><input class="input" type="email" name="email" required autocomplete="email"></div><div class="field"><label>Пароль</label><input class="input" type="password" name="password" required autocomplete="current-password"></div><button class="pill acid" type="submit">Войти →</button></form>
+<p class="smalltext">Нет аккаунта? <a href="/register"><u>Зарегистрироваться</u></a></p></div></main>
+<%- include('../partials/footer') %>

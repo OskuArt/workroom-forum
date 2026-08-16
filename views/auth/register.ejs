@@ -1,0 +1,5 @@
+<%- include('../partials/head') %><%- include('../partials/nav') %>
+<main class="form-shell"><div class="card acid"><div class="eyebrow">join</div><h1 class="h1">Создать аккаунт</h1><p>Сначала почта и пароль. Ник, профиль и CV заполним после подтверждения.</p>
+<form class="form-grid" method="post" action="/register"><div class="field"><label>Почта</label><input class="input" type="email" name="email" required autocomplete="email"></div><div class="field"><label>Пароль</label><input class="input" type="password" name="password" minlength="8" required autocomplete="new-password"><div class="hint">Минимум 8 символов.</div></div><button class="pill black" type="submit">Продолжить →</button></form>
+<p class="smalltext">Уже есть аккаунт? <a href="/login"><u>Войти</u></a></p></div></main>
+<%- include('../partials/footer') %>

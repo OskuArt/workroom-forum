@@ -1,0 +1,5 @@
+<%- include('../partials/head') %><%- include('../partials/nav') %>
+<main class="form-shell"><div class="card blue"><div class="eyebrow">email check</div><h1 class="h1">Подтвердите почту</h1><p>Мы отправили шестизначный код и кнопку-ссылку. Можно использовать любой вариант.</p>
+<form class="form-grid" method="post" action="/verify"><div class="field"><label>Почта</label><input class="input" type="email" name="email" value="<%= email %>" required></div><div class="field"><label>Код</label><input class="input" type="text" name="code" inputmode="numeric" maxlength="6" required></div><button class="pill black" type="submit">Подтвердить →</button></form>
+<form method="post" action="/verify/resend"><input type="hidden" name="email" value="<%= email %>"><button class="link-btn" type="submit"><u>Отправить код ещё раз</u></button></form></div></main>
+<%- include('../partials/footer') %>
