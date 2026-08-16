@@ -33,8 +33,6 @@
     if (/\.gif(?:$|\?)/i.test(img.src)) img.dataset.animatedAvatar = 'true';
   });
 
-  // Career organizer: filter already-rendered applications instantly, without
-  // throwing away the rest of the list on the server.
   const appBoard = document.querySelector('[data-applications-board]');
   if (appBoard) {
     const tabs = Array.from(appBoard.querySelectorAll('[data-application-filter]'));
@@ -59,8 +57,7 @@
       applyFilter(tab.dataset.applicationFilter);
     }));
 
-    const initial = location.hash.replace('#','') || 'all';
-    applyFilter(initial, false);
+    applyFilter(location.hash.replace('#','') || 'all', false);
 
     appBoard.querySelectorAll('.status-select').forEach((select) => {
       select.addEventListener('change', () => {
@@ -70,33 +67,36 @@
     });
   }
 
-  // Next catalogue refresh is every day at 00:00 Moscow time (UTC+3).
-  // Moscow does not currently observe DST, so midnight MSK = 21:00 UTC.
-  const refreshTimers = document.querySelectorAll('[data-job-refresh-timer]');
-  if (refreshTimers.length) {
-    const nextMoscowMidnight = () => {
+  const startRefreshCountdown = () => {
+    const timers = Array.from(document.querySelectorAll('[data-job-refresh-timer]'));
+    if (!timers.length) return;
+
+    const getTarget = () => {
       const now = new Date();
-      const utc = now.getTime();
-      const moscowNow = new Date(utc + 3 * 60 * 60 * 1000);
-      const y = moscowNow.getUTCFullYear();
-      const m = moscowNow.getUTCMonth();
-      const d = moscowNow.getUTCDate();
-      const nextMoscowMidnightAsUtc = Date.UTC(y, m, d + 1, 0, 0, 0) - 3 * 60 * 60 * 1000;
-      return nextMoscowMidnightAsUtc;
+      const moscow = new Date(now.getTime() + 3 * 60 * 60 * 1000);
+      return Date.UTC(
+        moscow.getUTCFullYear(),
+        moscow.getUTCMonth(),
+        moscow.getUTCDate() + 1,
+        0, 0, 0
+      ) - 3 * 60 * 60 * 1000;
     };
 
-    let target = nextMoscowMidnight();
-    const renderTimer = () => {
+    let target = getTarget();
+    const tick = () => {
       const now = Date.now();
-      if (now >= target) target = nextMoscowMidnight();
-      const ms = Math.max(0, target - now);
-      const total = Math.floor(ms / 1000);
-      const h = String(Math.floor(total / 3600)).padStart(2,'0');
-      const min = String(Math.floor((total % 3600) / 60)).padStart(2,'0');
-      const sec = String(total % 60).padStart(2,'0');
-      refreshTimers.forEach(el => { el.textContent = `${h}:${min}:${sec}`; });
+      if (!Number.isFinite(target) || now >= target) target = getTarget();
+      const total = Math.max(0, Math.floor((target - now) / 1000));
+      const h = String(Math.floor(total / 3600)).padStart(2, '0');
+      const m = String(Math.floor((total % 3600) / 60)).padStart(2, '0');
+      const s = String(total % 60).padStart(2, '0');
+      timers.forEach(el => { el.textContent = `${h}:${m}:${s}`; });
     };
-    renderTimer();
-    window.setInterval(renderTimer, 1000);
-  }
+
+    tick();
+    window.setInterval(tick, 1000);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) tick(); });
+  };
+
+  startRefreshCountdown();
 })();
