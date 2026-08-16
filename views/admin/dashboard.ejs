@@ -1,5 +1,18 @@
 <%- include('../partials/head') %><%- include('../partials/nav') %>
-<main class="container section"><div class="row between"><div><div class="eyebrow">admin</div><h1 class="h1">Пульт управления</h1></div><div class="row"><a class="pill" href="/admin/jobs">Вакансии</a><a class="pill" href="/admin/users">Пользователи</a><a class="pill" href="/admin/reports">Жалобы</a></div></div>
-<div class="admin-stats"><div class="card orange"><div class="metric"><%= stats.users %></div><p>пользователей</p></div><div class="card acid"><div class="metric"><%= stats.jobs %></div><p>активных вакансий</p></div><div class="card blue"><div class="metric"><%= stats.messages %></div><p>сообщений</p></div><div class="card pink"><div class="metric"><%= stats.reports %></div><p>открытых жалоб</p></div></div>
-<section class="section tight"><div class="card"><div class="row between"><h2 class="h2">Последние вакансии</h2><a class="pill small black" href="/admin/jobs">Управлять →</a></div><% recentJobs.forEach(j=>{ %><div class="admin-row"><strong><%= j.title %></strong><span><%= j.company %></span><span><%= j.source %></span><span><%= j.featured?'FEATURED':'—' %></span><span><%= j.is_active?'LIVE':'OFF' %></span><a href="/jobs/<%= j.id %>">→</a></div><% }) %></div></section></main>
+<main class="container section">
+  <div class="row between"><div><div class="eyebrow">admin</div><h1 class="h1">Пульт управления</h1></div><div class="row"><a class="pill" href="/admin/jobs">Вакансии</a><a class="pill" href="/admin/users">Пользователи</a><a class="pill" href="/admin/reports">Жалобы</a></div></div>
+  <div class="admin-stats"><div class="card orange"><div class="metric"><%= stats.users %></div><p>пользователей</p></div><div class="card acid"><div class="metric"><%= stats.jobs %></div><p>активных вакансий</p></div><div class="card blue"><div class="metric"><%= stats.messages %></div><p>сообщений</p></div><div class="card pink"><div class="metric"><%= stats.reports %></div><p>открытых жалоб</p></div></div>
+
+  <section class="section tight"><div class="card"><div class="row between"><h2 class="h2">Последние вакансии</h2><a class="pill small black" href="/admin/jobs">Управлять →</a></div><% recentJobs.forEach(j=>{ %><div class="admin-row"><strong><%= j.title %></strong><span><%= j.company %></span><span><%= j.source %></span><span><%= j.featured?'FEATURED':'—' %></span><span><%= j.is_active?'LIVE':'OFF' %></span><a href="/jobs/<%= j.id %>">→</a></div><% }) %></div></section>
+
+  <section class="section tight">
+    <form class="card admin-danger-zone stack" method="post" action="/admin/messages/purge">
+      <div class="eyebrow">danger zone / messages</div>
+      <h2 class="h2">Удалить все сообщения у всех пользователей</h2>
+      <p>Необратимая административная очистка всей таблицы сообщений. Аккаунты, CV и вакансии не затрагиваются.</p>
+      <input class="input" name="confirm" placeholder="Введите: УДАЛИТЬ ВСЕ" autocomplete="off">
+      <button class="pill black" type="submit">Очистить все сообщения</button>
+    </form>
+  </section>
+</main>
 <%- include('../partials/footer') %>
