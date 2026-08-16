@@ -46,29 +46,34 @@
         <div class="hashtag-cloud"><% hashtags.forEach(tag=>{ %><span>#<%= tag %></span><% }) %></div>
       </div>
     <% } %>
+
+    <% if(user){ %>
+      <details class="job-share job-share-compact" data-job-share data-job-id="<%= job.id %>">
+        <summary>↗ Переслать</summary>
+        <div class="job-share-body">
+          <div class="contact-strip contact-strip-avatars" data-job-share-contacts>
+            <div class="contact-strip-loading">Загружаю контакты…</div>
+          </div>
+          <div class="smalltext job-share-status" data-job-share-status></div>
+        </div>
+      </details>
+    <% } %>
   </article>
-  <aside class="stack">
-    <div class="card acid sticky-card stack">
+
+  <aside class="stack job-side-actions">
+    <div class="card acid sticky-card stack job-apply-card">
       <div class="eyebrow">apply</div><h2 class="h2">Подходит?</h2>
       <p>Нажатие сохранит вакансию в «Мои отклики», а затем откроет <strong>точную страницу первоисточника</strong>.</p>
-      <div class="row"><a class="pill black" href="/jobs/<%= job.id %>/apply" target="_blank" rel="noopener noreferrer">Откликнуться ↗</a><% if(user){ %><form method="post" action="/jobs/<%= job.id %>/save"><button class="pill" type="submit">Сохранить</button></form><% } %></div>
+      <div class="job-apply-actions">
+        <a class="pill black" href="/jobs/<%= job.id %>/apply" target="_blank" rel="noopener noreferrer">Откликнуться ↗</a>
+        <% if(user){ %><form method="post" action="/jobs/<%= job.id %>/save"><button class="pill" type="submit">Сохранить</button></form><% } %>
+      </div>
       <% if(application){ %><span class="status-chip status-<%= application.status %>"><%= applicationStatusLabels[application.status] %></span><% } %>
       <div class="smalltext muted">Источник: <%= job.source %></div>
       <% if(job.published_at){ %><div class="smalltext muted">Дата источника: <%= new Date(job.published_at).toLocaleDateString('ru-RU') %></div><% } %>
     </div>
 
     <% if(user){ %>
-      <details class="job-share" data-job-share data-job-id="<%= job.id %>">
-        <summary>↗ Переслать контакту</summary>
-        <div class="job-share-body">
-          <div class="smalltext muted">Выбери человека. Список листается горизонтально.</div>
-          <div class="contact-strip" data-job-share-contacts>
-            <div class="contact-strip-loading">Загружаю контакты…</div>
-          </div>
-          <div class="smalltext job-share-status" data-job-share-status></div>
-        </div>
-      </details>
-
       <details class="job-report">
         <summary>⚑ Пожаловаться на вакансию</summary>
         <form class="report-grid" method="post" action="/api/jobs/<%= job.id %>/report" enctype="multipart/form-data">
