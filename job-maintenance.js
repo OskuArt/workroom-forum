@@ -42,6 +42,9 @@ if (process.env.DATABASE_URL) {
   }
 
   setTimeout(maintain, 12_000).unref();
-  setInterval(maintain, 6 * 60 * 60 * 1000).unref();
+  // vacancy-monitor starts shortly after boot, so run a second normalization pass
+  // once its first batch has had time to land in PostgreSQL.
+  setTimeout(maintain, 4 * 60 * 1000).unref();
+  setInterval(maintain, 60 * 60 * 1000).unref();
   process.on('exit', () => pool.end().catch(() => {}));
 }
