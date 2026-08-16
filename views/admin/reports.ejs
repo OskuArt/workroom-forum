@@ -3,16 +3,23 @@
   <div><div class="eyebrow">admin / moderation</div><h1 class="h1">Жалобы</h1></div>
   <div class="stack">
     <% if(reports.length){ reports.forEach(r=>{ const meta=r.metadata||{}; %>
-      <div class="card <%= r.status==='open'?'orange':'' %>">
+      <div class="card <%= r.status==='open'?(r.reason_code==='ban_appeal'?'violet':'orange'):'' %>">
         <div class="row between align-start">
           <div style="min-width:0;flex:1">
             <div class="source"><%= r.target_type %> #<%= r.target_id %> · <%= r.reason_code || 'general' %></div>
             <h3 class="h3"><%= r.reason %></h3>
             <% if(r.comment){ %><p><%= r.comment %></p><% } %>
+            <% if(r.reason_code==='ban_appeal'){ %>
+              <div class="admin-appeal-meta">
+                <strong>Причина исходного бана:</strong> <%= meta.ban_reason || 'не указана' %><br>
+                <% if(meta.ban_ends_at){ %><strong>Бан действует до:</strong> <%= new Date(meta.ban_ends_at).toLocaleString('ru-RU') %><br><% } %>
+                <span class="smalltext">ban #<%= meta.ban_id || '?' %></span>
+              </div>
+            <% } %>
             <% if(meta.target_username){ %><div><strong>Пользователь:</strong> @<%= meta.target_username %></div><% } %>
             <% if(meta.job_title){ %><div><strong>Вакансия:</strong> <%= meta.job_title %> · <%= meta.company || '' %></div><% } %>
             <% if(meta.source_url){ %><div><a href="<%= meta.source_url %>" target="_blank" rel="noopener noreferrer"><u>Открыть источник ↗</u></a></div><% } %>
-            <div class="muted">от @<%= r.reporter || 'deleted' %> · <%= new Date(r.created_at).toLocaleString('ru-RU') %></div>
+            <div class="muted">от @<%= r.reporter || 'anonymous / IP' %> · <%= new Date(r.created_at).toLocaleString('ru-RU') %></div>
             <% if(Array.isArray(r.evidence_media_ids) && r.evidence_media_ids.length){ %>
               <div class="admin-report-evidence"><% r.evidence_media_ids.forEach(id=>{ %><a href="/media/<%= id %>" target="_blank"><img src="/media/<%= id %>" alt="Скриншот жалобы"></a><% }) %></div>
             <% } %>
