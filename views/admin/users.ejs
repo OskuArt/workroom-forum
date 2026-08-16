@@ -1,3 +1,40 @@
 <%- include('../partials/head') %><%- include('../partials/nav') %>
-<main class="container section"><div><div class="eyebrow">admin / users</div><h1 class="h1">Пользователи</h1></div><div class="card"><% users.forEach(u=>{ %><div class="admin-row"><div><strong><%= u.name || u.email %></strong><div class="muted"><%= u.username?`@${u.username}`:'без ника' %></div></div><span><%= u.role %></span><span>CV <%= u.cvs %></span><span>posts <%= u.posts %></span><span><%= u.is_banned?'BANNED':'ACTIVE' %></span><div class="row"><% if(u.username){ %><a href="/u/<%= u.username %>">↗</a><% } %><form method="post" action="/admin/users/<%= u.id %>"><input type="hidden" name="action" value="ban"><button class="link-btn" type="submit"><%= u.is_banned?'Unban':'Ban' %></button></form><form method="post" action="/admin/users/<%= u.id %>"><input type="hidden" name="action" value="admin"><button class="link-btn" type="submit"><%= u.role==='admin'?'Demote':'Admin' %></button></form></div></div><% }) %></div></main>
+<main class="container section">
+  <div><div class="eyebrow">admin / users</div><h1 class="h1">Пользователи</h1></div>
+  <div class="stack admin-user-list">
+    <% users.forEach(u=>{ %>
+      <div class="card admin-user-card">
+        <div class="row between align-start">
+          <div>
+            <strong><%= u.name || u.email %></strong>
+            <div class="muted"><%= u.username?`@${u.username}`:'без ника' %> · <%= u.email %></div>
+          </div>
+          <div class="row"><span class="tag"><%= u.role %></span><span class="tag">CV <%= u.cvs %></span><span class="tag">posts <%= u.posts %></span><span class="tag"><%= u.is_banned?'PERMA BANNED':'ACTIVE' %></span></div>
+        </div>
+
+        <div class="row admin-user-actions">
+          <% if(u.username){ %><a class="pill small" href="/u/<%= u.username %>">Открыть ↗</a><% } %>
+          <form method="post" action="/admin/users/<%= u.id %>"><input type="hidden" name="action" value="admin"><button class="pill small" type="submit"><%= u.role==='admin'?'Убрать admin':'Сделать admin' %></button></form>
+          <form method="post" action="/admin/users/<%= u.id %>"><input type="hidden" name="action" value="ban"><button class="pill small" type="submit"><%= u.is_banned?'Снять постоянный бан':'Постоянный бан' %></button></form>
+        </div>
+
+        <% if(Number(u.id)!==Number(user.id)){ %>
+          <details class="admin-temp-ban">
+            <summary>⏱ Временный бан аккаунта + IP</summary>
+            <form class="admin-temp-ban-form" method="post" action="/admin/users/<%= u.id %>/temp-ban">
+              <div class="ban-duration-row">
+                <input class="input" type="number" min="1" max="10000" name="duration_value" value="24" required aria-label="Длительность">
+                <select class="select" name="duration_unit" aria-label="Единица времени"><option value="minutes">минут</option><option value="hours" selected>часов</option><option value="days">дней</option><option value="weeks">недель</option></select>
+              </div>
+              <textarea class="textarea" name="reason" maxlength="1200" required placeholder="Причина бана. Пользователь увидит этот текст на экране блокировки."></textarea>
+              <div class="smalltext muted">Блокируется аккаунт и последний известный IP. Если IP ещё не известен, он закрепится за баном при следующем входе пользователя.</div>
+              <button class="pill orange" type="submit">Заблокировать временно</button>
+            </form>
+          </details>
+          <form method="post" action="/admin/users/<%= u.id %>/temp-unban"><button class="link-btn" type="submit">Снять временный бан</button></form>
+        <% } %>
+      </div>
+    <% }) %>
+  </div>
+</main>
 <%- include('../partials/footer') %>
