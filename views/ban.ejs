@@ -25,7 +25,7 @@
         <div class="ban-clock-card">
           <div class="eyebrow">ДО ОКОНЧАНИЯ</div>
           <strong data-ban-countdown data-ban-until="<%= new Date(ban.ends_at).toISOString() %>">--:--:--</strong>
-          <div class="smalltext">до <%= new Date(ban.ends_at).toLocaleString('ru-RU') %></div>
+          <div class="smalltext">до <%= new Date(ban.ends_at).toLocaleString('ru-RU',{timeZone:'Europe/Moscow'}) %> МСК</div>
         </div>
       </div>
 
