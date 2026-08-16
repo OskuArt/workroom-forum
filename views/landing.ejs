@@ -1,5 +1,16 @@
 <%- include('partials/head') %>
 <%- include('partials/nav') %>
+<%
+  const jobRegion = (location='') => {
+    const s = String(location).toLowerCase();
+    if (/remote|worldwide|anywhere|international/.test(s)) return 'remote';
+    if (/usa|united states|canada|mexico|brazil|argentina|chile|colombia|america|new york|california|toronto/.test(s)) return 'americas';
+    if (/china|japan|korea|india|singapore|thailand|vietnam|indonesia|malaysia|philippines|uae|dubai|israel|turkey|asia/.test(s)) return 'asia';
+    if (/australia|new zealand|sydney|melbourne|oceania/.test(s)) return 'oceania';
+    if (/africa|south africa|nigeria|kenya|egypt|morocco|ghana/.test(s)) return 'africa';
+    return 'europe';
+  };
+%>
 <main>
   <section class="hero container">
     <div class="hero-shell">
@@ -45,7 +56,7 @@
     <% if (jobs.length) { %>
       <div class="grid two">
         <% jobs.forEach(job => { %>
-          <a class="card job-card hover" href="/jobs/<%= job.id %>">
+          <a class="card job-card hover" data-region="<%= jobRegion(job.location) %>" href="/jobs/<%= job.id %>">
             <div>
               <div class="row between"><div class="source"><%= job.featured ? '★ ' : '' %><%= job.source %></div><% if(job.application_status){ %><span class="status-chip status-<%= job.application_status %>"><%= applicationStatusLabels[job.application_status] %></span><% } %></div>
               <h3 class="h3"><%= job.title %></h3><div><strong><%= job.company %></strong></div>
@@ -74,7 +85,7 @@
     </div>
   </section>
 
-  <section class="section container">
+  <section class="section container employer-cta">
     <div class="card yellow">
       <div class="grid two">
         <div><div class="eyebrow">for employers</div><h2 class="display medium">НУЖЕН ЧЕЛОВЕК?</h2></div>
