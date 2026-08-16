@@ -1,8 +1,8 @@
 // Safe production maintenance for WORK//ROOM.
 // Vacancy acquisition now lives exclusively in vacancy-monitor-v3.js.
-// This file archives stale imported vacancies, keeps ADMIN_EMAIL admin,
-// retires legacy feeds only after the new multi-source catalogue is healthy,
-// and removes old Telegram digest cards that contained many vacancies at once.
+// Loading it here also protects older Render Start Commands that preload maintenance
+// but have not yet picked up the newest Blueprint command.
+require('./vacancy-monitor-v3');
 
 const { Pool } = require('pg');
 
@@ -25,8 +25,6 @@ if (process.env.DATABASE_URL) {
         RETURNING id
       `, [String(days)]);
 
-      // Previous versions could save a whole Telegram digest as one vacancy.
-      // v3 resolves every outbound vacancy link separately, so retire those old cards.
       const digests = await pool.query(`
         UPDATE jobs
         SET is_active=FALSE,updated_at=NOW()
