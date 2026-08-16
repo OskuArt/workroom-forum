@@ -4,7 +4,7 @@ services:
     runtime: node
     plan: free
     buildCommand: npm install
-    startCommand: node -r ./brevo-fetch-shim.js -r ./vacancy-monitor-v3.js -r ./job-maintenance.js -r ./social-features.js server.js
+    startCommand: node -r ./brevo-fetch-shim.js -r ./vacancy-monitor-v3.js -r ./job-maintenance.js -r ./ban-system.js -r ./social-features.js server.js
     healthCheckPath: /healthz
     autoDeployTrigger: commit
     envVars:
