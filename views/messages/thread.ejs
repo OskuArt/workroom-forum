@@ -3,7 +3,7 @@
   <div class="row between chat-head">
     <div class="post-head">
       <% if(peer.avatar_media_id){ %><img class="avatar sm" src="/media/<%= peer.avatar_media_id %>" alt=""><% } else { %><div class="avatar sm placeholder">@</div><% } %>
-      <div><h1 class="h3"><%= peer.name || `@${peer.username}` %></h1><a class="muted" href="/u/<%= peer.username %>">@<%= peer.username %> · <%= peer.profession || '' %></a></div>
+      <div><h1 class="h3"><%= peer.name || `@${peer.username}` %></h1><a class="muted" href="/u/<%= peer.username %>">@<%= peer.username %> · <%= peer.profession || '' %></a><div class="presence-line" data-presence-user="<%= peer.username %>">проверяем статус…</div></div>
     </div>
     <div class="chat-toolbar">
       <form method="post" action="/messages/<%= peer.username %>/mute">
