@@ -1,5 +1,62 @@
 <%- include('../partials/head') %><%- include('../partials/nav') %>
-<main class="container section"><div class="row between"><div class="post-head"><% if(peer.avatar_media_id){ %><img class="avatar sm" src="/media/<%= peer.avatar_media_id %>" alt=""><% } else { %><div class="avatar sm placeholder">@</div><% } %><div><h1 class="h3"><%= peer.name || `@${peer.username}` %></h1><a class="muted" href="/u/<%= peer.username %>">@<%= peer.username %> · <%= peer.profession || '' %></a></div></div><div class="row"><form method="post" action="/messages/<%= peer.username %>/mute"><button class="pill small" type="submit"><%= muted ? 'Включить уведомления' : 'Отключить уведомления' %></button></form><form method="post" action="/messages/<%= peer.username %>/block"><button class="pill small <%= blocked ? 'acid' : '' %>" type="submit"><%= blocked ? 'Разблокировать' : 'В ЧС' %></button></form></div></div>
-<div class="section tight"><div class="chat-thread" data-chat-thread data-me="<%= user.username %>" data-peer="<%= peer.username %>"><% messages.forEach(m=>{ %><div class="bubble <%= Number(m.sender_id)===Number(user.id)?'mine':'' %>" data-message-id="<%= m.id %>"><% if(m.body){ %><div><%= m.body %></div><% } %><% if(m.media_id){ %><img src="/media/<%= m.media_id %>" alt="Вложение"><% } %><div class="muted smalltext"><%= new Date(m.created_at).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'}) %></div></div><% }) %></div>
-<% if(!blocked){ %><form class="chat-compose" data-chat-form method="post" action="/messages/<%= peer.username %>/send" enctype="multipart/form-data"><input class="input" name="body" autocomplete="off" placeholder="Сообщение..."><label class="pill small">Фото<input type="file" name="image" accept="image/*" hidden></label><button class="pill black" type="submit">Отправить</button></form><% } else { %><div class="privacy-note">Диалог заблокирован. Чтобы снова писать, разблокируйте пользователя.</div><% } %></div></main>
+<main class="container section">
+  <div class="row between chat-head">
+    <div class="post-head">
+      <% if(peer.avatar_media_id){ %><img class="avatar sm" src="/media/<%= peer.avatar_media_id %>" alt=""><% } else { %><div class="avatar sm placeholder">@</div><% } %>
+      <div><h1 class="h3"><%= peer.name || `@${peer.username}` %></h1><a class="muted" href="/u/<%= peer.username %>">@<%= peer.username %> · <%= peer.profession || '' %></a></div>
+    </div>
+    <div class="chat-toolbar">
+      <form method="post" action="/messages/<%= peer.username %>/mute">
+        <button class="icon-action <%= muted?'is-active':'' %>" type="submit" title="<%= muted?'Включить уведомления':'Отключить уведомления' %>" aria-label="<%= muted?'Включить уведомления':'Отключить уведомления' %>">🔇</button>
+      </form>
+      <form method="post" action="/messages/<%= peer.username %>/block">
+        <button class="icon-action <%= blocked?'is-active':'' %>" type="submit" title="<%= blocked?'Разблокировать':'В чёрный список' %>" aria-label="<%= blocked?'Разблокировать':'В чёрный список' %>">⛔</button>
+      </form>
+      <details class="chat-report">
+        <summary title="Пожаловаться" aria-label="Пожаловаться">⚑</summary>
+        <form class="report-grid" method="post" action="/api/chat/<%= peer.username %>/report">
+          <select class="select" name="reason_code" required>
+            <option value="">Причина жалобы</option><option value="spam">Спам</option><option value="insult">Оскорбления</option><option value="forbidden">Запрещённый контент</option><option value="other">Другое</option>
+          </select>
+          <textarea class="textarea" name="comment" placeholder="Комментарий. Для «Другое» обязателен."></textarea>
+          <button class="pill black small" type="submit">Отправить жалобу</button>
+        </form>
+      </details>
+    </div>
+  </div>
+
+  <div class="section tight">
+    <div class="chat-thread" data-chat-thread data-me="<%= user.username %>" data-peer="<%= peer.username %>">
+      <% messages.forEach(m=>{
+        const mine = Number(m.sender_id)===Number(user.id);
+        const hiddenForMe = (mine && m.sender_deleted_at) || (!mine && m.receiver_deleted_at);
+        if(hiddenForMe) return;
+      %>
+        <div class="bubble <%= mine?'mine':'' %>" data-message-id="<%= m.id %>" data-mine="<%= mine?'1':'0' %>">
+          <% if(m.body){ %><div class="bubble-main"><%= m.body %></div><% } %>
+          <% if(m.media_id){ %><img src="/media/<%= m.media_id %>" alt="Вложение"><% } %>
+          <% if(mine || user.role==='admin'){ %>
+            <div class="bubble-actions">
+              <% if(mine && m.body){ %><button class="bubble-action" type="button" data-message-edit title="Редактировать" aria-label="Редактировать">✎</button><% } %>
+              <button class="bubble-action" type="button" data-message-delete title="Удалить" aria-label="Удалить">🗑</button>
+            </div>
+          <% } %>
+          <div class="bubble-meta">
+            <% if(m.edited_at){ %><span data-edited-label>изменено</span><% } else { %><span data-edited-label hidden>изменено</span><% } %>
+            <time datetime="<%= new Date(m.created_at).toISOString() %>"><%= new Date(m.created_at).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'}) %></time>
+            <% if(mine){ %><span class="delivery-mark <%= m.read_at?'is-read':'' %>" data-delivery-mark><%= m.read_at?'✓✓':'✓' %></span><% } %>
+          </div>
+        </div>
+      <% }) %>
+    </div>
+
+    <% if(!blocked){ %>
+      <form class="chat-compose" data-chat-form method="post" action="/messages/<%= peer.username %>/send" enctype="multipart/form-data">
+        <input class="input" name="body" autocomplete="off" placeholder="Сообщение...">
+        <label class="pill small chat-file" title="Прикрепить изображение" aria-label="Прикрепить изображение">📎<input type="file" name="image" accept="image/*" hidden></label>
+        <button class="pill black" type="submit">Отправить</button>
+      </form>
+    <% } else { %><div class="privacy-note">Диалог заблокирован. Чтобы снова писать, разблокируйте пользователя.</div><% } %>
+  </div>
+</main>
 <%- include('../partials/footer') %>
