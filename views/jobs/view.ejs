@@ -1,12 +1,39 @@
 <%- include('../partials/head') %><%- include('../partials/nav') %>
 <main class="container section"><div class="job-detail">
-  <article class="card">
+  <article class="card job-full-card">
     <div class="row between"><div class="source"><%= job.featured ? '★ FEATURED · ' : '' %><%= job.source %></div><% if(application){ %><span class="status-chip status-<%= application.status %>"><%= applicationStatusLabels[application.status] %></span><% } %></div>
     <h1 class="h1"><%= job.title %></h1>
     <p class="lead"><strong><%= job.company %></strong></p>
-    <div class="job-meta"><% if(job.experience){ %><span class="tag tag-experience"><%= job.experience %></span><% } %><% if(job.work_mode){ %><span class="tag tag-mode"><%= job.work_mode %></span><% } %><% if(job.salary){ %><span class="tag tag-salary"><%= job.salary %></span><% } %><% if(job.location){ %><span class="tag tag-location"><%= job.location %></span><% } %><% if(job.sector){ %><span class="tag tag-sector"><%= job.sector %></span><% } %><% if(job.employment_type){ %><span class="tag tag-type"><%= job.employment_type %></span><% } %></div>
-    <% if(job.summary){ %><p class="lead" style="color:#c33a38;font-weight:700"><%= job.summary_ru || job.summary %></p><% } %>
-    <div class="rich"><%- job.description_html || '<p>Подробное описание доступно на сайте-источнике.</p>' %></div>
+
+    <% if(job.salary){ %>
+      <div class="job-salary-block"><div class="eyebrow">зарплата</div><div class="job-salary"><%= job.salary %></div></div>
+    <% } %>
+
+    <div class="job-meta">
+      <% if(job.experience){ %><span class="tag tag-experience"><%= job.experience %></span><% } %>
+      <% if(job.work_mode){ %><span class="tag tag-mode"><%= job.work_mode %></span><% } %>
+      <% if(job.location){ %><span class="tag tag-location"><%= job.location %></span><% } %>
+      <% if(job.country && job.country!==job.location){ %><span class="tag tag-location"><%= job.country %></span><% } %>
+      <% if(job.sector){ %><span class="tag tag-sector"><%= job.sector %></span><% } %>
+      <% if(job.employment_type){ %><span class="tag tag-type"><%= job.employment_type %></span><% } %>
+    </div>
+
+    <% if(job.summary){ %><p class="lead job-summary"><%= job.summary_ru || job.summary %></p><% } %>
+
+    <% if(job.description_ru_html){ %>
+      <% if(job.source_language && job.source_language!=='ru'){ %><div class="translation-note">АВТОПЕРЕВОД · оригинал: <%= String(job.source_language).toUpperCase() %></div><% } %>
+      <div class="rich"><%- job.description_ru_html %></div>
+    <% } else { %>
+      <div class="rich"><%- job.description_html || '<p>Подробное описание доступно на сайте-источнике.</p>' %></div>
+    <% } %>
+
+    <% const hashtags = Array.isArray(job.job_tags) ? job.job_tags.filter(Boolean) : []; %>
+    <% if(hashtags.length){ %>
+      <div class="job-hashtags">
+        <div class="eyebrow">навыки / инструменты</div>
+        <div class="hashtag-cloud"><% hashtags.forEach(tag=>{ %><span>#<%= tag %></span><% }) %></div>
+      </div>
+    <% } %>
   </article>
   <aside class="stack">
     <div class="card acid sticky-card stack">
