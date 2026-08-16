@@ -1,11 +1,39 @@
-// Compatibility adapter: the app's existing mail branch calls the Resend HTTP API.
-// On Render we preload this file and transparently route that one request to Brevo.
-// All other fetch() calls (jobs, translation, etc.) pass through unchanged.
+// Runtime compatibility adapter for WORK//ROOM on Render.
+// 1) Routes the app's existing HTTPS mail call through Brevo.
+// 2) Normalizes same-origin browser form requests behind Render's proxy so the
+//    app's origin guard compares against the public request hostname.
+
+const http = require('http');
+const originalEmit = http.Server.prototype.emit;
+
+http.Server.prototype.emit = function workroomServerEmit(event, ...args) {
+  if (event === 'request') {
+    const req = args[0];
+    const headers = req && req.headers;
+    const fetchSite = String(headers?.['sec-fetch-site'] || '').toLowerCase();
+
+    // Modern browsers mark ordinary login/register form posts as same-origin.
+    // Render sits behind a proxy, so normalize Origin to the public forwarded host
+    // before server.js performs its existing production origin check.
+    if (headers?.origin && fetchSite === 'same-origin') {
+      const host = String(headers['x-forwarded-host'] || headers.host || '')
+        .split(',')[0]
+        .trim();
+      const proto = String(headers['x-forwarded-proto'] || 'https')
+        .split(',')[0]
+        .trim();
+      if (host) headers.origin = `${proto}://${host}`;
+    }
+  }
+
+  return originalEmit.call(this, event, ...args);
+};
 
 const originalFetch = global.fetch;
 
 if (typeof originalFetch === 'function' && process.env.BREVO_API_KEY) {
-  // Let the existing server enter its HTTPS-mail branch without exposing Brevo details there.
+  // Let the existing server enter its HTTPS-mail branch, then transparently
+  // translate that request into Brevo's transactional-email API format.
   process.env.RESEND_API_KEY = process.env.BREVO_API_KEY;
   process.env.RESEND_FROM = process.env.BREVO_FROM_EMAIL || '';
 
