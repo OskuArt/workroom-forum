@@ -53,9 +53,12 @@ const originalUse=express.application.use;
 express.application.use=function workroomPresenceUse(...args){
   const isAuthLocals=args.some(arg=>typeof arg==='function' && /applicationStatusLabels/.test(Function.prototype.toString.call(arg)));
   const terminal404=args.some(arg=>typeof arg==='function' && /Такой страницы нет|status\(404\)/.test(Function.prototype.toString.call(arg)));
+
+  // API must be registered before the app's terminal 404 middleware.
+  if(terminal404&&!this.__workroomPresenceRoutes){Object.defineProperty(this,'__workroomPresenceRoutes',{value:true});installRoutes(this);}
+
   const result=originalUse.apply(this,args);
   if(isAuthLocals&&!this.__workroomPresenceHeartbeat){Object.defineProperty(this,'__workroomPresenceHeartbeat',{value:true});originalUse.call(this,heartbeat);}
-  if(terminal404&&!this.__workroomPresenceRoutes){Object.defineProperty(this,'__workroomPresenceRoutes',{value:true});installRoutes(this);}
   return result;
 };
 
