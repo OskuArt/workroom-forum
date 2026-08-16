@@ -1,6 +1,38 @@
 <%- include('../partials/head') %><%- include('../partials/nav') %>
 <main class="container section"><div class="job-detail">
-  <article class="card"><div class="row between"><div class="source"><%= job.featured ? '★ FEATURED · ' : '' %><%= job.source %></div><% if(application){ %><span class="status-chip status-<%= application.status %>"><%= applicationStatusLabels[application.status] %></span><% } %></div><h1 class="h1"><%= job.title %></h1><p class="lead"><strong><%= job.company %></strong></p><div class="job-meta"><% if(job.experience){ %><span class="tag tag-experience"><%= job.experience %></span><% } %><% if(job.work_mode){ %><span class="tag tag-mode"><%= job.work_mode %></span><% } %><% if(job.salary){ %><span class="tag tag-salary"><%= job.salary %></span><% } %><% if(job.location){ %><span class="tag tag-location"><%= job.location %></span><% } %><% if(job.sector){ %><span class="tag tag-sector"><%= job.sector %></span><% } %><% if(job.employment_type){ %><span class="tag tag-type"><%= job.employment_type %></span><% } %></div><% if(job.summary){ %><p class="lead" style="color:#c33a38;font-weight:700"><%= job.summary_ru || job.summary %></p><% } %><div class="rich"><%- job.description_html || '<p>Подробное описание доступно на сайте-источнике.</p>' %></div></article>
-  <aside><div class="card acid sticky-card stack"><div class="eyebrow">apply</div><h2 class="h2">Подходит?</h2><p>Нажатие сохранит вакансию в «Мои отклики», а затем откроет <strong>точную страницу источника</strong>.</p><div class="row"><a class="pill black" href="/jobs/<%= job.id %>/apply" target="_blank" rel="noopener noreferrer">Откликнуться ↗</a><% if(user){ %><form method="post" action="/jobs/<%= job.id %>/save"><button class="pill" type="submit">Сохранить</button></form><% } %></div><% if(application){ %><span class="status-chip status-<%= application.status %>"><%= applicationStatusLabels[application.status] %></span><% } %><div class="smalltext muted">Источник: <%= job.source %></div></div></aside>
+  <article class="card">
+    <div class="row between"><div class="source"><%= job.featured ? '★ FEATURED · ' : '' %><%= job.source %></div><% if(application){ %><span class="status-chip status-<%= application.status %>"><%= applicationStatusLabels[application.status] %></span><% } %></div>
+    <h1 class="h1"><%= job.title %></h1>
+    <p class="lead"><strong><%= job.company %></strong></p>
+    <div class="job-meta"><% if(job.experience){ %><span class="tag tag-experience"><%= job.experience %></span><% } %><% if(job.work_mode){ %><span class="tag tag-mode"><%= job.work_mode %></span><% } %><% if(job.salary){ %><span class="tag tag-salary"><%= job.salary %></span><% } %><% if(job.location){ %><span class="tag tag-location"><%= job.location %></span><% } %><% if(job.sector){ %><span class="tag tag-sector"><%= job.sector %></span><% } %><% if(job.employment_type){ %><span class="tag tag-type"><%= job.employment_type %></span><% } %></div>
+    <% if(job.summary){ %><p class="lead" style="color:#c33a38;font-weight:700"><%= job.summary_ru || job.summary %></p><% } %>
+    <div class="rich"><%- job.description_html || '<p>Подробное описание доступно на сайте-источнике.</p>' %></div>
+  </article>
+  <aside class="stack">
+    <div class="card acid sticky-card stack">
+      <div class="eyebrow">apply</div><h2 class="h2">Подходит?</h2>
+      <p>Нажатие сохранит вакансию в «Мои отклики», а затем откроет <strong>точную страницу источника</strong>.</p>
+      <div class="row"><a class="pill black" href="/jobs/<%= job.id %>/apply" target="_blank" rel="noopener noreferrer">Откликнуться ↗</a><% if(user){ %><form method="post" action="/jobs/<%= job.id %>/save"><button class="pill" type="submit">Сохранить</button></form><% } %></div>
+      <% if(application){ %><span class="status-chip status-<%= application.status %>"><%= applicationStatusLabels[application.status] %></span><% } %>
+      <div class="smalltext muted">Источник: <%= job.source %></div>
+    </div>
+    <% if(user){ %>
+      <details class="job-report">
+        <summary>⚑ Пожаловаться на вакансию</summary>
+        <form class="report-grid" method="post" action="/api/jobs/<%= job.id %>/report" enctype="multipart/form-data">
+          <select class="select" name="reason_code" required>
+            <option value="">Выберите причину</option>
+            <option value="scam">Мошенничество</option>
+            <option value="stale">Несуществующая вакансия / игнор</option>
+            <option value="unfair_rejection">Отказали по необоснованным причинам</option>
+            <option value="other">Другое</option>
+          </select>
+          <textarea class="textarea" name="comment" placeholder="Комментарий к жалобе. Для «Другое» обязателен."></textarea>
+          <label class="report-evidence"><strong>Скриншоты</strong><br><span class="smalltext muted">До 4 изображений, максимум 5 МБ каждое.</span><input type="file" name="evidence" accept="image/*" multiple></label>
+          <button class="pill black" type="submit">Отправить жалобу</button>
+        </form>
+      </details>
+    <% } %>
+  </aside>
 </div></main>
 <%- include('../partials/footer') %>
