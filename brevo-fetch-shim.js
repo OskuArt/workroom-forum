@@ -1,13 +1,7 @@
 // Runtime compatibility adapter for WORK//ROOM on Render.
-// 1) Loads the daily partner vacancy scheduler/importers.
-// 2) Loads the hh.ru + Instagram reliability watchdog.
-// 3) Loads chat controls, reporting and admin moderation add-ons.
-// 4) Routes the app's existing HTTPS mail call through Brevo.
-// 5) Normalizes same-origin browser form requests behind Render's proxy.
-
-require('./partner-job-imports');
-require('./source-watchdog');
-require('./social-features');
+// Vacancy monitoring and social add-ons are preloaded explicitly by Render.
+// This shim only routes verification email through Brevo and normalizes
+// same-origin form requests behind Render's proxy.
 
 const http = require('http');
 const originalEmit = http.Server.prototype.emit;
