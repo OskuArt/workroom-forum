@@ -32,6 +32,23 @@ if (process.env.DATABASE_URL) {
         WHERE COALESCE(location,'')='' AND COALESCE(country,'')<>''
       `).catch(() => {});
 
+      // Transition away from the previous Jobicy/Arbeitnow/direct-ATS experiment
+      // only after the new hh/Telegram/Instagram pipeline has enough inventory.
+      const primary = await pool.query(`
+        SELECT COUNT(*)::int AS c FROM jobs
+        WHERE is_active=TRUE AND (source='hh.ru' OR source LIKE 'Telegram · %' OR source LIKE 'Instagram%')
+      `);
+      if (Number(primary.rows[0]?.c || 0) >= 20) {
+        const retired = await pool.query(`
+          UPDATE jobs SET is_active=FALSE,updated_at=NOW()
+          WHERE is_active=TRUE AND (
+            source IN ('Jobicy','Arbeitnow') OR source LIKE '% · direct'
+          )
+          RETURNING id
+        `);
+        if (retired.rowCount) console.log(`[maintenance] retired ${retired.rowCount} legacy-source vacancies`);
+      }
+
       const adminEmail = String(process.env.ADMIN_EMAIL || '').trim().toLowerCase();
       if (adminEmail) await pool.query(`UPDATE users SET role='admin' WHERE LOWER(email)=LOWER($1)`, [adminEmail]);
 
