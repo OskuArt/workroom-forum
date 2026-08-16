@@ -1,5 +1,65 @@
 <%- include('../partials/head') %><%- include('../partials/nav') %>
-<main class="container section"><div class="row between"><div><div class="eyebrow">admin / jobs</div><h1 class="h1">Вакансии</h1></div><form method="post" action="/admin/jobs/import"><button class="pill acid" type="submit">↻ Импорт источников</button></form></div>
-<section class="grid two align-start"><form class="card black stack" method="post" action="/admin/jobs"><h2 class="h2">Добавить вручную</h2><input class="input" name="title" placeholder="Название вакансии" required><input class="input" name="company" placeholder="Компания" required><input class="input" name="source" placeholder="Источник: Direct / Telegram / X" value="Direct"><input class="input" name="source_url" type="url" placeholder="Точная ссылка на вакансию" required><textarea class="textarea" name="summary" placeholder="Красное краткое описание 3–4 строки"></textarea><textarea class="textarea" name="description" rows="10" placeholder="Полное описание"></textarea><div class="grid two"><input class="input" name="experience" placeholder="Опыт"><input class="input" name="work_mode" placeholder="Remote / Hybrid / Office"><input class="input" name="salary" placeholder="ЗП"><input class="input" name="location" placeholder="Локация"><input class="input" name="sector" placeholder="Сфера"><input class="input" name="employment_type" placeholder="Full-time"></div><input class="input" type="datetime-local" name="expires_at"><label class="checkbox"><input type="checkbox" name="featured"> Выделить вакансию</label><button class="pill acid" type="submit">Опубликовать →</button></form>
-<div class="stack"><% jobs.forEach(j=>{ %><div class="card"><div class="row between"><div><div class="source"><%= j.source %></div><h3 class="h3"><%= j.title %></h3><div><%= j.company %></div></div><div class="row"><span class="tag"><%= j.featured?'FEATURED':'regular' %></span><span class="tag"><%= j.is_active?'LIVE':'OFF' %></span></div></div><div class="row"><a class="pill small" href="/jobs/<%= j.id %>" target="_blank">Открыть</a><a class="pill small" href="/admin/jobs/<%= j.id %>/edit">Редактировать</a><form method="post" action="/admin/jobs/<%= j.id %>"><input type="hidden" name="action" value="feature"><button class="pill small" type="submit">★ featured</button></form><form method="post" action="/admin/jobs/<%= j.id %>"><input type="hidden" name="action" value="active"><button class="pill small" type="submit"><%= j.is_active?'Снять':'Вернуть' %></button></form><form method="post" action="/admin/jobs/<%= j.id %>"><input type="hidden" name="action" value="delete"><button class="link-btn danger" data-confirm="Удалить вакансию безвозвратно?" type="submit">Удалить</button></form></div></div><% }) %></div></section></main>
+<main class="container section">
+  <div class="row between">
+    <div><div class="eyebrow">admin / jobs</div><h1 class="h1">Вакансии</h1></div>
+    <form method="post" action="/admin/jobs/import"><button class="pill acid" type="submit">↻ Импорт источников</button></form>
+  </div>
+
+  <section class="grid two align-start">
+    <form class="card black stack admin-job-manual" method="post" action="/admin/jobs">
+      <h2 class="h2">Добавить вручную</h2>
+      <label class="field"><span>Название вакансии</span><input class="input" name="title" placeholder="Например, Senior Product Designer" required></label>
+      <label class="field"><span>Компания</span><input class="input" name="company" placeholder="Название компании" required></label>
+      <label class="field"><span>Источник</span><input class="input" name="source" placeholder="Direct / Telegram / Instagram" value="Direct"></label>
+      <label class="field"><span>Точная ссылка</span><input class="input" name="source_url" type="url" placeholder="https://..." required></label>
+      <label class="field"><span>Краткое описание</span><textarea class="textarea" name="summary" placeholder="Красное краткое описание 3–4 строки"></textarea></label>
+      <label class="field"><span>Полное описание</span><textarea class="textarea" name="description" rows="10" placeholder="Полное описание вакансии"></textarea></label>
+      <div class="grid two">
+        <input class="input" name="experience" placeholder="Опыт">
+        <input class="input" name="work_mode" placeholder="Remote / Hybrid / Office">
+        <input class="input" name="salary" placeholder="ЗП">
+        <input class="input" name="location" placeholder="Локация">
+        <input class="input" name="sector" placeholder="Сфера">
+        <input class="input" name="employment_type" placeholder="Full-time">
+      </div>
+      <label class="field"><span>Снять после</span><input class="input" type="datetime-local" name="expires_at"></label>
+      <label class="checkbox"><input type="checkbox" name="featured"> Выделить вакансию</label>
+      <button class="pill acid" type="submit">Опубликовать →</button>
+    </form>
+
+    <div class="stack admin-job-list">
+      <% jobs.forEach(j=>{ %>
+        <div class="card admin-job-card">
+          <div class="row between align-start">
+            <div><div class="source"><%= j.source %></div><h3 class="h3"><%= j.title %></h3><div><%= j.company %></div></div>
+            <div class="row"><span class="tag"><%= j.featured?'FEATURED':'regular' %></span><span class="tag"><%= j.is_active?'LIVE':'OFF' %></span></div>
+          </div>
+          <div class="row admin-job-actions">
+            <a class="pill small" href="/jobs/<%= j.id %>" target="_blank">Открыть</a>
+            <a class="pill small" href="/admin/jobs/<%= j.id %>/edit">Редактировать</a>
+            <form method="post" action="/admin/jobs/<%= j.id %>"><input type="hidden" name="action" value="feature"><button class="pill small" type="submit">★ featured</button></form>
+            <form method="post" action="/admin/jobs/<%= j.id %>"><input type="hidden" name="action" value="active"><button class="pill small" type="submit"><%= j.is_active?'Снять':'Вернуть' %></button></form>
+          </div>
+
+          <details class="admin-temp-ban">
+            <summary>⏱ Временно скрыть вакансию</summary>
+            <form class="admin-temp-ban-form" method="post" action="/admin/jobs/<%= j.id %>/temp-ban">
+              <div class="ban-duration-row">
+                <input class="input" type="number" min="1" max="10000" name="duration_value" value="24" required aria-label="Длительность">
+                <select class="select" name="duration_unit" aria-label="Единица времени"><option value="minutes">минут</option><option value="hours" selected>часов</option><option value="days">дней</option><option value="weeks">недель</option></select>
+              </div>
+              <textarea class="textarea" name="reason" maxlength="1200" required placeholder="Причина временного скрытия вакансии"></textarea>
+              <button class="pill orange" type="submit">Скрыть на это время</button>
+            </form>
+          </details>
+
+          <div class="row between admin-danger-actions">
+            <form method="post" action="/admin/jobs/<%= j.id %>/temp-unban"><button class="link-btn" type="submit">Снять временный бан</button></form>
+            <form method="post" action="/admin/jobs/<%= j.id %>"><input type="hidden" name="action" value="delete"><button class="link-btn danger" data-confirm="Удалить вакансию безвозвратно?" type="submit">Удалить</button></form>
+          </div>
+        </div>
+      <% }) %>
+    </div>
+  </section>
+</main>
 <%- include('../partials/footer') %>
