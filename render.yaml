@@ -4,7 +4,7 @@ services:
     runtime: node
     plan: free
     buildCommand: npm install
-    startCommand: node -r ./brevo-fetch-shim.js -r ./vacancy-monitor.js -r ./job-maintenance.js -r ./social-features.js server.js
+    startCommand: node -r ./brevo-fetch-shim.js -r ./vacancy-monitor.js -r ./hh-safety-net.js -r ./job-maintenance.js -r ./social-features.js server.js
     healthCheckPath: /healthz
     autoDeployTrigger: commit
     envVars:
@@ -34,7 +34,7 @@ services:
       - key: VACANCY_MAX_AGE_DAYS
         value: 21
 
-      # hh.ru: multilingual role + vacancy queries.
+      # hh.ru: multilingual role + vacancy queries plus broad fallback.
       - key: HH_PERIOD_DAYS
         value: 3
       - key: HH_QUERY_LIMIT
@@ -47,7 +47,6 @@ services:
         value: "mirkreatorovjob,designhunters,jun_hi_vacancies,serbia_vacancies,rabotavserbii,desivr_design"
 
       # Instagram: partner accounts + rotating multilingual vacancy hashtags.
-      # Four new hashtags/day stays below the rolling unique-hashtag allowance.
       - key: INSTAGRAM_JOB_ACCOUNTS
         value: "vacancy_design,simple_studio,beginit.indrive.ca"
       - key: INSTAGRAM_HASHTAG_BUDGET
