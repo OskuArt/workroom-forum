@@ -4,7 +4,7 @@ services:
     runtime: node
     plan: free
     buildCommand: npm install
-    startCommand: node -r ./brevo-fetch-shim.js -r ./vacancy-monitor.js -r ./hh-safety-net.js -r ./job-maintenance.js -r ./social-features.js server.js
+    startCommand: node -r ./brevo-fetch-shim.js -r ./vacancy-monitor-v3.js -r ./job-maintenance.js -r ./social-features.js server.js
     healthCheckPath: /healthz
     autoDeployTrigger: commit
     envVars:
@@ -25,8 +25,7 @@ services:
       - key: BREVO_FROM_EMAIL
         sync: false
 
-      # Legacy Jobicy/Arbeitnow importer in server.js is intentionally disabled.
-      # Vacancy monitoring now runs through vacancy-monitor.js only.
+      # Old Jobicy/Arbeitnow path is disabled. v3 is the only vacancy acquisition pipeline.
       - key: ENABLE_JOB_IMPORT
         value: false
       - key: VACANCY_MONITOR_ENABLED
@@ -34,7 +33,7 @@ services:
       - key: VACANCY_MAX_AGE_DAYS
         value: 21
 
-      # hh.ru: multilingual role + vacancy queries plus broad fallback.
+      # hh.ru: multilingual role/vacancy monitoring. No API key is required for public vacancy search.
       - key: HH_PERIOD_DAYS
         value: 3
       - key: HH_QUERY_LIMIT
@@ -42,7 +41,7 @@ services:
       - key: HH_DETAIL_LIMIT
         value: 260
 
-      # Telegram: public partner channels monitored through their public t.me pages.
+      # Telegram: digest posts are opened link-by-link; primary job pages become the stored source.
       - key: TELEGRAM_JOB_CHANNELS
         value: "mirkreatorovjob,designhunters,jun_hi_vacancies,serbia_vacancies,rabotavserbii,desivr_design"
 
