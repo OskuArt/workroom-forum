@@ -77,12 +77,19 @@ CREATE TABLE IF NOT EXISTS jobs (
   summary TEXT,
   summary_ru TEXT,
   description_html TEXT,
+  description_ru_html TEXT,
+  source_language TEXT,
   experience TEXT,
   work_mode TEXT,
   salary TEXT,
   location TEXT,
+  country TEXT,
   sector TEXT,
   employment_type TEXT,
+  job_tags TEXT[] NOT NULL DEFAULT '{}',
+  imported_query TEXT,
+  source_metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  content_fingerprint TEXT,
   published_at TIMESTAMPTZ,
   expires_at TIMESTAMPTZ,
   featured BOOLEAN NOT NULL DEFAULT FALSE,
@@ -93,7 +100,16 @@ CREATE TABLE IF NOT EXISTS jobs (
 );
 CREATE INDEX IF NOT EXISTS jobs_active_idx ON jobs(is_active, published_at DESC);
 CREATE INDEX IF NOT EXISTS jobs_sector_idx ON jobs(sector);
+CREATE INDEX IF NOT EXISTS jobs_country_idx ON jobs(country);
+CREATE INDEX IF NOT EXISTS jobs_source_idx ON jobs(source);
 ALTER TABLE jobs ADD COLUMN IF NOT EXISTS summary_ru TEXT;
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS description_ru_html TEXT;
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS source_language TEXT;
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS country TEXT;
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS job_tags TEXT[] NOT NULL DEFAULT '{}';
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS imported_query TEXT;
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS source_metadata JSONB NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS content_fingerprint TEXT;
 
 CREATE TABLE IF NOT EXISTS applications (
   id BIGSERIAL PRIMARY KEY,
