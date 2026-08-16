@@ -9,6 +9,18 @@
     if (/africa|south africa|nigeria|kenya|egypt|morocco|ghana/.test(s)) return 'africa';
     return 'europe';
   };
+  const pageUrl = (n) => {
+    const parts = [];
+    Object.entries(filters || {}).forEach(([key,value]) => {
+      if (key === 'page' || value == null || String(value) === '') return;
+      parts.push(`${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`);
+    });
+    parts.push(`page=${n}`);
+    return `/jobs?${parts.join('&')}`;
+  };
+  const catalogueTotal = typeof totalCount === 'number' ? totalCount : jobs.length;
+  const currentPage = typeof page === 'number' ? page : 1;
+  const pagesTotal = typeof pageCount === 'number' ? pageCount : 1;
 %>
 <main class="container section">
   <div class="jobs-refresh-sticky">
@@ -34,7 +46,7 @@
     </label>
     <button class="pill black" type="submit">Найти</button>
   </form>
-  <div class="section tight"><div class="muted"><%= jobs.length %> вакансий в текущей выборке</div></div>
+  <div class="section tight"><div class="muted"><strong><%= catalogueTotal %></strong> свежих вакансий в текущей выборке · старше 3 месяцев не показываем · сначала самые новые<% if(pagesTotal>1){ %> · страница <%= currentPage %> из <%= pagesTotal %><% } %></div></div>
   <% if(jobs.length){ %><div class="grid two"><% jobs.forEach(job=>{ %>
     <a class="card job-card hover" data-region="<%= jobRegion(`${job.location || ''} ${job.country || ''}`) %>" href="/jobs/<%= job.id %>">
       <div>
@@ -55,6 +67,14 @@
         </div>
       </div><span class="arrow">→</span>
     </a>
-  <% }) %></div><% } else { %><div class="empty">Ничего не найдено. Попробуйте снять часть фильтров или изменить формулировку поиска.</div><% } %>
+  <% }) %></div>
+  <% if(pagesTotal>1){ %>
+    <nav class="row between section tight" aria-label="Страницы вакансий">
+      <div><% if(currentPage>1){ %><a class="pill" href="<%= pageUrl(currentPage-1) %>">← Новее</a><% } %></div>
+      <span class="tag"><%= currentPage %> / <%= pagesTotal %></span>
+      <div><% if(currentPage<pagesTotal){ %><a class="pill black" href="<%= pageUrl(currentPage+1) %>">Старше →</a><% } %></div>
+    </nav>
+  <% } %>
+  <% } else { %><div class="empty">Ничего не найдено. Попробуйте снять часть фильтров или изменить формулировку поиска.</div><% } %>
 </main>
 <%- include('../partials/footer') %>
