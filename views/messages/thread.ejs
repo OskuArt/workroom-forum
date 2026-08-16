@@ -33,11 +33,18 @@
         if(hiddenForMe) return;
       %>
         <div class="bubble <%= mine?'mine':'' %>" data-message-id="<%= m.id %>" data-mine="<%= mine?'1':'0' %>">
-          <% if(m.body){ %><div class="bubble-main"><%= m.body %></div><% } %>
+          <% if(m.shared_job_id){ %>
+            <a class="shared-job-message" href="/jobs/<%= m.shared_job_id %>">
+              <span class="shared-job-kicker">ВАКАНСИЯ ↗</span>
+              <strong><%= m.body || 'Открыть вакансию' %></strong>
+            </a>
+          <% } else { %>
+            <% if(m.body){ %><div class="bubble-main"><%= m.body %></div><% } %>
+          <% } %>
           <% if(m.media_id){ %><img src="/media/<%= m.media_id %>" alt="Вложение"><% } %>
           <% if(mine || user.role==='admin'){ %>
             <div class="bubble-actions">
-              <% if(mine && m.body){ %><button class="bubble-action" type="button" data-message-edit title="Редактировать" aria-label="Редактировать">✎</button><% } %>
+              <% if(mine && m.body && !m.shared_job_id){ %><button class="bubble-action" type="button" data-message-edit title="Редактировать" aria-label="Редактировать">✎</button><% } %>
               <button class="bubble-action" type="button" data-message-delete title="Удалить" aria-label="Удалить">🗑</button>
             </div>
           <% } %>
