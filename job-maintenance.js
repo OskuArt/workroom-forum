@@ -38,6 +38,26 @@ if (process.env.DATABASE_URL) {
         RETURNING id
       `).catch(() => ({ rowCount:0 }));
 
+      // The catalogue page currently renders a finite batch. Keep enough fresh
+      // Telegram inventory without letting it consume every slot before hh/Instagram.
+      const telegramCap = Math.max(60, Math.min(220, Number(process.env.TELEGRAM_ACTIVE_CAP || 120)));
+      const capped = await pool.query(`
+        WITH ranked AS (
+          SELECT id,
+            ROW_NUMBER() OVER (ORDER BY COALESCE(published_at,created_at) DESC,id DESC) AS rn
+          FROM jobs
+          WHERE is_active=TRUE AND (
+            source LIKE 'Telegram · %'
+            OR COALESCE(source_metadata->>'discovered_via','')='telegram'
+          )
+        )
+        UPDATE jobs j
+        SET is_active=FALSE,updated_at=NOW()
+        FROM ranked r
+        WHERE j.id=r.id AND r.rn>$1
+        RETURNING j.id
+      `, [telegramCap]).catch(() => ({ rowCount:0 }));
+
       await pool.query(`
         UPDATE jobs
         SET location=country
@@ -70,6 +90,7 @@ if (process.env.DATABASE_URL) {
 
       if (stale.rowCount) console.log(`[maintenance] archived ${stale.rowCount} vacancies older than ${days} days`);
       if (digests.rowCount) console.log(`[maintenance] retired ${digests.rowCount} old Telegram digest cards`);
+      if (capped.rowCount) console.log(`[maintenance] capped Telegram inventory by ${capped.rowCount} cards to keep sources mixed`);
     } catch (err) {
       console.warn('[maintenance] skipped:', err.message);
     }
