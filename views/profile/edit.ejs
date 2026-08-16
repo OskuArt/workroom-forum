@@ -1,10 +1,10 @@
 <%- include('../partials/head') %><%- include('../partials/nav') %>
 <main class="container section"><div class="row between align-start"><div><div class="eyebrow">profile setup</div><h1 class="h1">Соберите свой профиль.</h1></div><span class="tag">@ник уникален</span></div>
-<form class="grid two" method="post" action="/settings/profile" enctype="multipart/form-data">
+<form class="grid two profile-editor" method="post" action="/settings/profile" enctype="multipart/form-data">
   <div class="card stack">
-    <div class="field"><label>Фото</label><input class="input" type="file" name="avatar" accept="image/png,image/jpeg,image/webp,image/gif"></div>
+    <div class="field"><label>Фото / GIF</label><input class="input" type="file" name="avatar" accept="image/png,image/jpeg,image/webp,image/gif"><div class="hint">Можно загрузить JPG, PNG, WEBP или анимированный GIF до 5 МБ.</div></div>
     <div class="field"><label>Имя</label><input class="input" name="name" maxlength="120" value="<%= profile.name || '' %>"></div>
-    <div class="field"><label>Никнейм</label><input class="input" name="username" maxlength="40" required placeholder="osku" value="<%= profile.username || '' %>"><div class="hint">Только латиница, цифры, точка, _ и -. Проверяется на уникальность.</div></div>
+    <div class="field"><label>Никнейм</label><input class="input" name="username" maxlength="40" required placeholder="nikname" value="<%= profile.username || '' %>"><div class="hint">Только латиница, цифры, точка, _ и -. Проверяется на уникальность.</div></div>
     <div class="field"><label>Профессия</label><input class="input" name="profession" maxlength="160" placeholder="Graphic Designer / React Developer / Marketer" value="<%= profile.profession || '' %>"></div>
     <div class="field"><label>Локация</label><input class="input" name="location" maxlength="160" placeholder="Saint Petersburg / Remote" value="<%= profile.location || '' %>"></div>
     <div class="field"><label>О себе</label><textarea class="textarea" name="bio" maxlength="1200"><%= profile.bio || '' %></textarea></div>
@@ -12,7 +12,8 @@
   <div class="card blue stack">
     <div class="field"><label>Telegram</label><input class="input" name="tg" placeholder="@username" value="<%= profile.tg || '' %>"></div>
     <div class="field"><label>VK / другая соцсеть</label><input class="input" name="vk" placeholder="https://..." value="<%= profile.vk || '' %>"></div>
-    <div class="field"><label>Контактная почта</label><input class="input" type="email" name="contact_email" value="<%= profile.contact_email || '' %>" placeholder="Можно отличаться от почты для входа"></div><div class="field"><label>Телефон</label><input class="input" name="phone" value="<%= profile.phone || '' %>"></div>
+    <div class="field"><label>Контактная почта</label><input class="input" type="email" name="contact_email" value="<%= profile.contact_email || '' %>" placeholder="Можно отличаться от почты для входа"></div>
+    <div class="field"><label>Телефон</label><input class="input" name="phone" value="<%= profile.phone || '' %>"></div>
     <div class="field"><label>Дата рождения</label><input class="input" type="date" name="birth_date" value="<%= profile.birth_date ? new Date(profile.birth_date).toISOString().slice(0,10) : '' %>"></div>
     <label class="checkbox"><input type="checkbox" name="open_to_work" <%= profile.open_to_work?'checked':'' %>> Открыт(а) к предложениям</label>
     <button class="pill black" type="submit">Сохранить профиль →</button>
