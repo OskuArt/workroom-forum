@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#7b5cff">
+  <title><%= title %> · <%= siteName %></title>
+  <link rel="icon" href="/favicon.svg?v=20260816d" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css?v=20260816d">
+  <link rel="stylesheet" href="/polish.css?v=20260816d">
+</head>
+<body class="ban-page">
+  <main class="ban-shell">
+    <section class="ban-card">
+      <div class="ban-mark">✦</div>
+      <div class="eyebrow">TEMPORARY ACCESS PAUSE</div>
+      <h1 class="display medium ban-title">ДОСТУП<br>ВРЕМЕННО<br>ОГРАНИЧЕН.</h1>
+
+      <div class="ban-info-grid">
+        <div class="ban-reason">
+          <div class="eyebrow">ПРИЧИНА</div>
+          <p><%= ban.reason %></p>
+        </div>
+        <div class="ban-clock-card">
+          <div class="eyebrow">ДО ОКОНЧАНИЯ</div>
+          <strong data-ban-countdown data-ban-until="<%= new Date(ban.ends_at).toISOString() %>">--:--:--</strong>
+          <div class="smalltext">до <%= new Date(ban.ends_at).toLocaleString('ru-RU') %></div>
+        </div>
+      </div>
+
+      <% if(appealSent || appeal){ %>
+        <div class="ban-appeal-sent">✓ Обжалование отправлено администратору. Оно появилось в разделе жалоб.</div>
+      <% } else { %>
+        <details class="ban-appeal">
+          <summary class="pill black">Обжаловать →</summary>
+          <form method="post" action="/ban/appeal" class="stack">
+            <input type="hidden" name="ban_id" value="<%= ban.id %>">
+            <label class="field">
+              <span>Почему бан нужно пересмотреть?</span>
+              <textarea class="textarea" name="comment" minlength="5" maxlength="4000" required placeholder="Опишите ситуацию, почему вы считаете блокировку ошибочной, и добавьте важный контекст."></textarea>
+            </label>
+            <button class="pill acid" type="submit">Отправить администратору →</button>
+          </form>
+        </details>
+      <% } %>
+
+      <p class="ban-network-note">Ограничение действует для аккаунта и сети, с которой он использовался. После окончания таймера доступ восстановится автоматически.</p>
+    </section>
+  </main>
+  <script src="/ban.js?v=20260816d"></script>
+</body>
+</html>
