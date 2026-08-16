@@ -15,7 +15,7 @@
     <span>Каталог обновляется ежедневно в 00:00 МСК</span>
     <strong data-job-refresh-timer>00:00:00</strong>
   </div>
-  <div class="row between align-start"><div><div class="eyebrow">job board</div><h1 class="h1">Вакансии</h1><p class="lead">Карточки с точной ссылкой на источник. Ищи по роли, компании, сфере, стране, городу и формату работы.</p></div><a class="pill" href="/employers">Разместить вакансию →</a></div>
+  <div class="row between align-start"><div><div class="eyebrow">job board</div><h1 class="h1">Вакансии</h1><p class="lead">Карточки с точной ссылкой на первоисточник. Ищи по роли, компании, сфере, стране, городу и формату работы.</p></div><a class="pill" href="/employers">Разместить вакансию →</a></div>
   <form class="filters jobs-filters" method="get" action="/jobs">
     <input class="input filter-query" name="q" value="<%= filters.q || '' %>" placeholder="Должность, компания, навык">
     <select class="select filter-sector custom-select" name="sector" data-placeholder="Сфера" data-theme="sector"><option value="">Сфера</option><% sectors.forEach(s=>{ %><option value="<%= s %>" <%= filters.sector===s?'selected':'' %>><%= s %></option><% }) %></select>
@@ -38,7 +38,11 @@
   <% if(jobs.length){ %><div class="grid two"><% jobs.forEach(job=>{ %>
     <a class="card job-card hover" data-region="<%= jobRegion(`${job.location || ''} ${job.country || ''}`) %>" href="/jobs/<%= job.id %>">
       <div>
-        <div class="row between"><div class="source"><%= job.featured ? '★ FEATURED · ' : '' %><%= job.source %></div><% if(job.application_status){ %><span class="status-chip status-<%= job.application_status %>"><%= applicationStatusLabels[job.application_status] %></span><% } %></div>
+        <div class="row between">
+          <div class="source"><%= job.featured ? '★ FEATURED · ' : '' %><%= job.source %></div>
+          <% if(job.application_status){ %><span class="status-chip status-<%= job.application_status %>"><%= applicationStatusLabels[job.application_status] %></span><% } %>
+        </div>
+        <% if(job.published_at){ %><div class="job-card-date">опубликовано <%= new Date(job.published_at).toLocaleDateString('ru-RU') %></div><% } %>
         <h2 class="h3"><%= job.title %></h2><strong><%= job.company %></strong><p class="summary"><%= job.summary_ru || job.summary || 'Описание доступно внутри карточки.' %></p>
         <div class="job-meta">
           <% if(job.experience){ %><span class="tag tag-experience"><%= job.experience %></span><% } %>
