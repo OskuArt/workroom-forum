@@ -1,0 +1,66 @@
+/* CONSTELLATION V8 polish */
+
+/* Telegram-like overlapping read ticks */
+.readTicks{display:inline-flex;align-items:center;min-width:16px;height:12px;position:relative;font-size:12px;font-weight:900;letter-spacing:0!important;opacity:.78}
+.readTicks i{font-style:normal;display:block;line-height:1}
+.readTicks i+ i{margin-left:-5px}
+.readTicks.read{opacity:1}
+
+/* Keep the composer visible without scrolling the whole page */
+#main .chatLayout{height:calc(100dvh - 190px);min-height:360px;max-height:760px;overflow:hidden;align-items:stretch}
+#main .chatList,#main .chatRoom{height:100%;min-height:0}
+#main .chatList{overflow-y:auto}
+#main .chatRoom{display:flex;flex-direction:column;overflow:hidden}
+#main .chatHead{flex:0 0 auto}
+#main .messages{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding-bottom:12px}
+#main .composer{flex:0 0 auto;position:sticky;bottom:0;z-index:4;background:inherit;padding-bottom:max(10px,env(safe-area-inset-bottom))}
+
+/* Orientation flag directly on the select after the choice */
+#pOri.orientationSelect,#fOri.orientationSelect{color:#fff!important;text-shadow:0 1px 5px rgba(0,0,0,.48);font-weight:800;background-color:#6c6c72!important;background-repeat:no-repeat!important;background-size:100% 100%!important;background-position:center!important}
+#pOri.orientationSelect option,#fOri.orientationSelect option{background:#fff;color:#111;text-shadow:none}
+#pOri.flag-hetero,#fOri.flag-hetero{background-image:repeating-linear-gradient(to bottom,#161616 0 12%,#eeeeee 12% 24%)!important}
+#pOri.flag-gay,#fOri.flag-gay{background-image:linear-gradient(to bottom,#e40303 0 16.6%,#ff8c00 16.6% 33.2%,#ffed00 33.2% 49.8%,#008026 49.8% 66.4%,#24408e 66.4% 83%,#732982 83%)!important}
+#pOri.flag-lesbian,#fOri.flag-lesbian{background-image:linear-gradient(to bottom,#d52d00 0 20%,#ff9a56 20% 40%,#fff 40% 60%,#d362a4 60% 80%,#a30262 80%)!important}
+#pOri.flag-bi,#fOri.flag-bi{background-image:linear-gradient(to bottom,#d60270 0 40%,#9b4f96 40% 60%,#0038a8 60%)!important}
+#pOri.flag-pan,#fOri.flag-pan{background-image:linear-gradient(to bottom,#ff218c 0 33.33%,#ffd800 33.33% 66.66%,#21b1ff 66.66%)!important}
+#pOri.flag-queer,#fOri.flag-queer{background-image:linear-gradient(to bottom,#181818 0 25%,#a3a3a3 25% 50%,#f4f4f4 50% 75%,#800080 75%)!important}
+#pOri.flag-other,#fOri.flag-other{background-image:linear-gradient(135deg,#7067a9,#be78a4,#70aaa5)!important}
+.badge.flag-queer::before{background:linear-gradient(to bottom,#181818 0 25%,#a3a3a3 25% 50%,#f4f4f4 50% 75%,#800080 75%)!important}
+
+/* Muted result colors */
+.badge.psychBadge{border-color:transparent!important;text-shadow:none!important;color:#222!important;font-weight:800}
+.mbti-analyst{background:#eee8f5!important;color:#4e3e66!important}
+.mbti-diplomat{background:#e7f1e8!important;color:#3e6549!important}
+.mbti-sentinel{background:#e6eff4!important;color:#365b70!important}
+.mbti-explorer{background:#f4eedc!important;color:#705d2d!important}
+.ennea-1{background:#e9eef1!important;color:#425864!important}.ennea-2{background:#f4e8ea!important;color:#714b55!important}.ennea-3{background:#eee9df!important;color:#6e5b39!important}.ennea-4{background:#eee7f1!important;color:#655071!important}.ennea-5{background:#e5edf1!important;color:#3f5c6b!important}.ennea-6{background:#e8ede3!important;color:#506344!important}.ennea-7{background:#f3eddc!important;color:#705f30!important}.ennea-8{background:#f1e5e3!important;color:#75463f!important}.ennea-9{background:#e7eee9!important;color:#456153!important}
+.result-attachment{background:#e9eef5!important;color:#3d546e!important}.result-care{background:#f0e9ef!important;color:#684d65!important}
+
+/* Focused tests */
+.v8TestGrid .v8TestCard{cursor:pointer;transition:transform .18s ease,box-shadow .18s ease,border-color .18s ease}
+.v8TestGrid .v8TestCard:hover{transform:translateY(-3px);box-shadow:0 14px 34px rgba(0,0,0,.08)}
+.testResultBadge{display:inline-flex;padding:7px 10px;border-radius:999px;font-size:13px;font-weight:850;margin:3px 0 10px}
+.testCardDescription{font-size:13px;line-height:1.5;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden;opacity:.78}
+.testCardCta{display:inline-block;margin-top:10px;font-weight:800;font-size:13px}
+.testFocus{min-height:calc(100dvh - 110px);display:flex;flex-direction:column;padding:8px 0 28px}
+.testFocusTop{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:18px}
+.testFocusTop>div:last-child{text-align:right}
+.testFocusProgress{height:5px;border-radius:999px;background:rgba(120,120,130,.16);overflow:hidden;margin-bottom:20px}
+.testFocusProgress span{display:block;height:100%;background:currentColor;border-radius:inherit;transition:width .2s ease}
+.v8Question{flex:1;display:flex;flex-direction:column;justify-content:center;min-height:420px;padding:clamp(24px,5vw,64px)!important}
+.v8Question h2{font-size:clamp(30px,4vw,58px);line-height:1.06;max-width:950px;margin:0 auto 42px;text-align:center}
+.v8Question .likert{width:min(900px,100%);margin-inline:auto}
+.v8Question .testNav{width:min(900px,100%);margin:34px auto 0}
+.resultFocus{justify-content:center}
+.testResultHero{width:min(980px,100%);margin:auto;padding:clamp(28px,6vw,74px);border-radius:32px;background:#efefed}
+.testResultHero h1{font-size:clamp(58px,10vw,132px);line-height:.9;margin:12px 0 28px;letter-spacing:-.055em}
+.testResultHero p{font-size:clamp(16px,1.8vw,22px);line-height:1.62;max-width:860px;margin:0}
+.testResultActions{width:min(980px,100%);margin:18px auto 0;display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap}
+
+@media(max-width:760px){
+  #main .chatLayout{height:calc(100dvh - 155px);min-height:320px}
+  .v8Question{min-height:360px;padding:22px 14px!important}
+  .v8Question h2{font-size:30px;margin-bottom:28px}
+  .testResultHero{border-radius:24px;padding:28px 20px}
+  .testFocusTop{align-items:flex-start}
+}
