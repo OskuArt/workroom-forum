@@ -1,0 +1,81 @@
+/* CONSTELLATION V7 interaction polish */
+
+/* Searchable dropdowns for long profile option lists */
+.choiceDropdown{position:relative;border:1px solid var(--line,#d7d8dc);border-radius:16px;background:var(--panel,#fff);overflow:visible;transition:border-color .18s ease,box-shadow .18s ease}
+.choiceDropdown:focus-within,.choiceDropdown.is-open{border-color:currentColor;box-shadow:0 0 0 3px rgba(30,30,30,.06)}
+.choiceDropdown>.input{width:100%;border:0!important;border-radius:15px!important;background:transparent!important;box-shadow:none!important;margin:0!important}
+.choiceSelectedSummary{display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:0 12px 10px;min-height:10px;color:var(--muted,#6f737b);font-size:12px}
+.choiceSelectedSummary:empty{display:none}
+.choiceSelectedSummary .miniChoice{display:inline-flex;align-items:center;padding:4px 7px;border-radius:999px;background:rgba(120,120,130,.1);line-height:1.1}
+.choiceDropdown>.choiceGrid{display:none!important;position:absolute;left:-1px;right:-1px;top:calc(100% + 5px);z-index:90;max-height:270px;overflow-y:auto;overscroll-behavior:contain;padding:6px!important;border:1px solid var(--line,#d7d8dc);border-radius:15px;background:var(--panel,#fff);box-shadow:0 18px 45px rgba(0,0,0,.16);grid-template-columns:1fr!important;gap:2px!important}
+.choiceDropdown.is-open>.choiceGrid{display:block!important}
+.choiceOptionRow{width:100%;display:flex;align-items:center;justify-content:space-between;gap:12px;border:0;background:transparent;color:inherit;text-align:left;padding:10px 11px;border-radius:11px;cursor:pointer;font:inherit}
+.choiceOptionRow:hover{background:rgba(120,120,130,.09)}
+.choiceOptionRow.on{background:rgba(120,120,130,.15);font-weight:750}
+.choiceOptionRow .choiceCheck{width:21px;height:21px;display:grid;place-items:center;border:1px solid rgba(120,120,130,.35);border-radius:7px;font-size:12px;flex:0 0 auto}
+.choiceOptionRow.on .choiceCheck{background:currentColor}
+.choiceOptionRow.on .choiceCheck span{color:var(--panel,#fff)}
+.choiceEmpty{padding:16px 12px;color:var(--muted,#777);font-size:13px}
+
+/* Manual masked inputs */
+.maskedDateInput,.maskedTimeInput{font-variant-numeric:tabular-nums;letter-spacing:.04em}
+.maskedTimeInput{width:124px!important;text-align:center;font-weight:800;font-size:17px}
+.timeSelects .maskedTimeInput{min-width:124px}
+
+/* Meeting outcome toggle */
+.meetingOutcome{display:inline-flex;align-items:center;padding:3px;border:1px solid var(--line,#d7d8dc);border-radius:999px;background:rgba(120,120,130,.06);gap:2px}
+.meetingOutcome button{border:0;background:transparent;color:inherit;border-radius:999px;padding:7px 10px;font:inherit;font-size:11px;font-weight:800;cursor:pointer;white-space:nowrap;opacity:.58}
+.meetingOutcome button:hover{opacity:1}
+.meetingOutcome button.on{opacity:1;background:var(--text,#151515);color:var(--bg,#fff)}
+.meetingOutcome .didNot.on{background:#b74a4a;color:#fff}
+.meetingRow .adminActions,.meetingRow .actions{align-items:center}
+.nextMeetingControls{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:12px}
+
+/* Orientation flags */
+.badge.orientationFlag{position:relative;isolation:isolate;overflow:hidden;color:#fff!important;border-color:rgba(255,255,255,.34)!important;text-shadow:0 1px 6px rgba(0,0,0,.48);font-weight:800}
+.badge.orientationFlag::before{content:"";position:absolute;z-index:-1;inset:-8px;filter:blur(5px);transform:scale(1.12);opacity:.92}
+.badge.flag-hetero::before{background:repeating-linear-gradient(to bottom,#111 0 12%,#f4f4f4 12% 24%)}
+.badge.flag-gay::before{background:linear-gradient(to bottom,#e40303 0 16.6%,#ff8c00 16.6% 33.2%,#ffed00 33.2% 49.8%,#008026 49.8% 66.4%,#24408e 66.4% 83%,#732982 83%)}
+.badge.flag-lesbian::before{background:linear-gradient(to bottom,#d52d00 0 20%,#ff9a56 20% 40%,#fff 40% 60%,#d362a4 60% 80%,#a30262 80%)}
+.badge.flag-bi::before{background:linear-gradient(to bottom,#d60270 0 40%,#9b4f96 40% 60%,#0038a8 60%)}
+.badge.flag-pan::before{background:linear-gradient(to bottom,#ff218c 0 33.33%,#ffd800 33.33% 66.66%,#21b1ff 66.66%)}
+.badge.flag-queer::before{background:linear-gradient(135deg,#000 0 12%,#784f17 12% 24%,#e40303 24% 36%,#ff8c00 36% 48%,#ffed00 48% 60%,#008026 60% 72%,#24408e 72% 84%,#732982 84%)}
+.badge.flag-other::before{background:linear-gradient(135deg,#6d5dfc,#e56fb7,#57c7be)}
+
+/* Chat read receipts + reactions */
+.msg{position:relative}
+.messageMeta{display:flex;justify-content:flex-end;align-items:center;gap:5px;margin-top:5px;font-size:10px;line-height:1;color:var(--muted,#777)}
+.readTicks{font-weight:900;letter-spacing:-2px;font-size:12px;opacity:.78;min-width:18px;text-align:right}
+.readTicks.read{opacity:1}
+.messageReactions{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px}
+.reactionPill{display:inline-flex;align-items:center;gap:4px;border:1px solid rgba(120,120,130,.25);border-radius:999px;background:rgba(120,120,130,.08);padding:3px 7px;font-size:12px;line-height:1;cursor:pointer;font-family:"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif}
+.reactionPill.mine{outline:1px solid currentColor;background:rgba(120,120,130,.16)}
+.reactionPill small{font:700 10px/1 system-ui,sans-serif}
+.reactionMenu{position:fixed;z-index:10000;display:flex;gap:3px;flex-wrap:wrap;width:max-content;max-width:min(420px,calc(100vw - 24px));padding:7px;border:1px solid rgba(120,120,130,.28);border-radius:18px;background:rgba(25,25,28,.94);backdrop-filter:blur(18px);box-shadow:0 16px 50px rgba(0,0,0,.3)}
+.reactionMenu button{width:34px;height:34px;border:0;border-radius:11px;background:transparent;display:grid;place-items:center;cursor:pointer;font-size:20px;font-family:"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif;transition:transform .14s ease,background .14s ease}
+.reactionMenu button:hover{transform:scale(1.18);background:rgba(255,255,255,.12)}
+
+/* Corner notifications */
+#v7LiveStack{position:fixed;right:18px;top:82px;z-index:9998;display:flex;flex-direction:column;gap:10px;width:min(370px,calc(100vw - 24px));pointer-events:none}
+.v7Popup{pointer-events:auto;display:grid;grid-template-columns:48px 1fr;gap:11px;align-items:center;padding:11px 13px;border:1px solid rgba(120,120,130,.2);border-radius:18px;background:rgba(250,250,248,.93);color:#151515;box-shadow:0 18px 50px rgba(0,0,0,.16);backdrop-filter:blur(18px);cursor:pointer;animation:v7PopIn .28s cubic-bezier(.2,.8,.2,1) both;overflow:hidden}
+body.after .v7Popup{background:rgba(25,24,28,.94);color:#fff;border-color:rgba(255,255,255,.13)}
+.v7Popup.leaving{animation:v7PopOut .22s ease both}
+.v7Popup img{width:48px;height:48px;border-radius:14px;object-fit:cover;background:#ddd}
+.v7Popup strong{display:block;font-size:13px;margin-bottom:3px}
+.v7Popup p{margin:0;font-size:12px;line-height:1.35;opacity:.76}
+.v7Popup .tiny{font-size:11px;opacity:.58;margin-top:2px}
+.achievementPopup{grid-template-columns:48px 1fr}
+.achPopIcon{width:48px;height:48px;border-radius:15px;display:grid;place-items:center;background:#f2e66b;color:#111;font-size:23px;font-weight:900}
+.achievementPopup strong{font-size:14px}
+.achievementPopup .achievementHint{font-size:11px;margin-top:2px;opacity:.62}
+@keyframes v7PopIn{from{opacity:0;transform:translateX(24px) scale(.96)}to{opacity:1;transform:none}}
+@keyframes v7PopOut{to{opacity:0;transform:translateX(24px) scale(.97)}}
+
+/* Prefer Apple emoji glyphs where the platform actually has the font. */
+.reactionMenu,.reactionPill,.achPopIcon,.chatMeta strong>span,.emojiApple{font-family:"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif}
+
+@media(max-width:720px){
+  #v7LiveStack{right:10px;top:70px;width:calc(100vw - 20px)}
+  .meetingOutcome{width:100%;justify-content:space-between}.meetingOutcome button{flex:1}
+  .choiceDropdown>.choiceGrid{max-height:230px}
+}
