@@ -1,0 +1,1 @@
+CONSTELLATION uses a dedicated PostgreSQL schema named `constellation` via the server pool search_path. This keeps its tables isolated from existing WORK//ROOM tables when sharing the same Render PostgreSQL instance.
