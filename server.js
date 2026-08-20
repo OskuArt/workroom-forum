@@ -1,6 +1,6 @@
 const fs=require('fs');
 const path=require('path');
-const patch=require('./server-v5-patch');
+const patch=require('./server-v6-patch');
 try{
   const base=fs.readFileSync(path.join(__dirname,'server-base.js'),'utf8');
   const generated=patch(base);
