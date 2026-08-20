@@ -1,9 +1,10 @@
 const fs=require('fs');
 const path=require('path');
-const patch=require('./server-v6-patch');
+const patchV6=require('./server-v6-patch');
+const patchChat=require('./server-chat-fix');
 try{
   const base=fs.readFileSync(path.join(__dirname,'server-base.js'),'utf8');
-  const generated=patch(base);
+  const generated=patchChat(patchV6(base));
   const out=path.join(__dirname,'server.generated.js');
   fs.writeFileSync(out,generated);
   require(out);
