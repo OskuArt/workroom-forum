@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CONSTELLATION Admin</title>
+<link rel="stylesheet" href="/styles.css">
+<style>
+body{background:#0b0c10;color:#f7f7f4}
+.adminRoot{min-height:100vh}
+.adminTop{position:sticky;top:0;z-index:30;display:flex;align-items:center;justify-content:space-between;padding:14px 20px;background:#111319;border-bottom:1px solid #2a2d37}
+.adminTop .logoIcon{background:#f4e76f;color:#111}
+.adminShell{display:grid;grid-template-columns:220px 1fr;min-height:calc(100vh - 68px)}
+.adminSide{padding:16px;background:#101217;border-right:1px solid #292c35}.adminSide button{width:100%;border:0;background:transparent;color:#ddd;text-align:left;padding:12px 13px;border-radius:14px;font-weight:800;margin-bottom:6px}.adminSide button.on,.adminSide button:hover{background:#f4e76f;color:#111}
+.adminMain{padding:20px;max-width:1280px;width:100%;margin:auto}
+.adminCard{background:#151820;border:1px solid #2c303b;border-radius:22px;padding:16px}.adminCard h3{margin:0 0 5px}
+.adminList{display:flex;flex-direction:column;gap:10px}.adminRow{display:grid;grid-template-columns:56px 1fr auto;gap:12px;align-items:center;background:#151820;border:1px solid #2c303b;border-radius:20px;padding:12px}.adminRow img{width:56px;height:56px;border-radius:16px;object-fit:cover;background:#222}.adminRow p{margin:4px 0;color:#9fa5b2;font-size:13px}.adminActions{display:flex;gap:7px;flex-wrap:wrap;justify-content:flex-end}
+.adminInput{background:#0e1015!important;color:#fff!important;border-color:#303541!important}.adminLogin{min-height:100vh;display:grid;place-items:center;padding:20px}.adminLoginBox{width:min(440px,100%);background:#151820;border:1px solid #2c303b;border-radius:28px;padding:24px}
+.statGrid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px}.stat{background:#151820;border:1px solid #2c303b;border-radius:20px;padding:16px}.stat b{font-size:32px;display:block}
+.statusAdmin{font-size:11px;padding:6px 9px;border-radius:999px;background:#2b303b}.statusAdmin.new{background:#695d2f}.statusAdmin.actioned{background:#365c44}.statusAdmin.closed{background:#3d414b}
+@media(max-width:850px){.adminShell{grid-template-columns:1fr}.adminSide{display:flex;overflow:auto;border-right:0;border-bottom:1px solid #292c35}.adminSide button{white-space:nowrap;width:auto}.statGrid{grid-template-columns:1fr 1fr}.adminRow{grid-template-columns:48px 1fr}.adminActions{grid-column:1/-1;justify-content:flex-start}}
+</style>
+</head>
+<body>
+<div id="adminRoot" class="adminRoot"></div>
+<div id="overlay"></div>
+<div id="toast"></div>
+<script src="/admin.js"></script>
+</body>
+</html>

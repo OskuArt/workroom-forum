@@ -2,9 +2,10 @@ services:
   - type: web
     name: constellation-dating
     runtime: node
+    plan: free
     branch: constellation-dating
-    buildCommand: rm -rf .constellation_app && mkdir .constellation_app && tar -xzf constellation-bundle.tar.gz -C .constellation_app && cd .constellation_app && npm install
-    startCommand: cd .constellation_app && npm start
+    buildCommand: npm install
+    startCommand: npm start
     healthCheckPath: /
     envVars:
       - key: DATABASE_URL
@@ -32,3 +33,5 @@ services:
 
 databases:
   - name: constellation-db
+    plan: free
+    postgresMajorVersion: "18"

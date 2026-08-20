@@ -1,31 +1,17 @@
 {
-  "name": "workroom-forum",
-  "version": "1.1.0",
+  "name": "constellation-dating",
+  "version": "1.0.0",
   "private": true,
-  "description": "Swiss-style jobs + CV organizer + people search + private messaging MVP",
-  "main": "server.js",
   "type": "commonjs",
   "scripts": {
     "start": "node server.js",
-    "dev": "node --watch server.js",
-    "check": "node --check server.js"
+    "dev": "node server.js"
   },
   "engines": {
     "node": ">=20"
   },
   "dependencies": {
-    "bcryptjs": "^3.0.2",
-    "connect-pg-simple": "^10.0.0",
-    "dotenv": "^17.2.1",
-    "ejs": "^3.1.10",
-    "express": "^5.1.0",
-    "express-rate-limit": "^8.0.1",
-    "express-session": "^1.18.2",
-    "helmet": "^8.1.0",
-    "multer": "^2.0.2",
-    "nodemailer": "^7.0.5",
-    "pg": "^8.16.3",
-    "sanitize-html": "^2.17.0",
-    "socket.io": "^4.8.3"
+    "express": "^4.21.2",
+    "pg": "^8.16.3"
   }
 }

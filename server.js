@@ -1,1349 +1,783 @@
-require('dotenv').config();
-
-const path = require('path');
-const fs = require('fs');
-const crypto = require('crypto');
-const http = require('http');
-const express = require('express');
-const session = require('express-session');
-const pgSession = require('connect-pg-simple')(session);
-const { Pool } = require('pg');
-const bcrypt = require('bcryptjs');
-const nodemailer = require('nodemailer');
-const multer = require('multer');
-const helmet = require('helmet');
-const rateLimit = require('express-rate-limit');
-const sanitizeHtml = require('sanitize-html');
-const { Server } = require('socket.io');
+const express = require("express");
+const crypto = require("crypto");
+const path = require("path");
+const { Pool } = require("pg");
 
 const app = express();
-const server = http.createServer(app);
-const io = new Server(server, { transports: ['websocket', 'polling'] });
+app.set("trust proxy", 1);
+app.use(express.json({ limit: "8mb" }));
 
-const PORT = Number(process.env.PORT || 3000);
-const BASE_URL = process.env.BASE_URL || process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
-const SITE_NAME = process.env.SITE_NAME || 'WORK//ROOM';
-const isProduction = process.env.NODE_ENV === 'production';
-
-const APPLICATION_STATUS_LABELS = {
-  want: 'Сохранено',
-  waiting: 'В ожидании',
-  interview: 'Собеседование',
-  offer: 'Оффер',
-  rejected: 'Отказ',
-  not_fit: 'Не подошло',
-};
-
+const PORT = Number(process.env.PORT || 10000);
+const DATABASE_URL = process.env.DATABASE_URL;
+if (!DATABASE_URL) {
+  console.error("DATABASE_URL is required.");
+  process.exit(1);
+}
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: process.env.DATABASE_SSL === 'true' || (isProduction && !process.env.DATABASE_SSL)
-    ? { rejectUnauthorized: false }
-    : false,
+  connectionString: DATABASE_URL,
+  ssl: process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : false,
+  max: 10,
+  options: "-c search_path=constellation,public",
 });
 
-function q(text, params = []) {
-  return pool.query(text, params);
+const SESSION_DAYS = 30;
+const DAY = 86400000;
+const CODE_MINUTES = 10;
+const DEMO_CODE = "111111";
+const ALLOW_DEMO_AUTH = String(process.env.ALLOW_DEMO_AUTH || "true").toLowerCase() === "true";
+const BREVO_API_KEY = process.env.BREVO_API_KEY || "";
+const BREVO_SENDER_EMAIL = process.env.BREVO_SENDER_EMAIL || "";
+const BREVO_SENDER_NAME = process.env.BREVO_SENDER_NAME || "CONSTELLATION";
+const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || "").toLowerCase();
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "";
+const AUTH_PEPPER = process.env.AUTH_PEPPER || process.env.SESSION_SECRET || "constellation-dev-pepper";
+
+const nowIso = () => new Date().toISOString();
+const id = () => crypto.randomUUID();
+const hash = (s) => crypto.createHash("sha256").update(String(s)).digest("hex");
+const safeEmail = (e) => String(e || "").trim().toLowerCase();
+function ipOf(req) {
+  const f = req.headers["x-forwarded-for"];
+  return String(Array.isArray(f) ? f[0] : (f || req.ip || req.socket.remoteAddress || ""))
+    .split(",")[0].trim().replace(/^::ffff:/, "");
+}
+function pairKey(a,b){ return [String(a), String(b)].sort().join(":"); }
+function modeOk(m){ return m === "harmony" || m === "after"; }
+function publicProfile(row, mode) {
+  const p = row.profile || {};
+  const common = p.common || {};
+  const block = p[mode] || {};
+  return {
+    id: row.id,
+    version: mode === "harmony" ? row.version_harmony : row.version_after,
+    name: common.name || "",
+    birthDate: common.birthDate || "",
+    city: common.city || "",
+    gender: common.gender || "",
+    orientation: common.orientation || "",
+    photo: common.photo || "",
+    tags: common.tags || [],
+    bio: block.bio || "",
+    harmony: mode === "harmony" ? block : undefined,
+    after: mode === "after" ? block : undefined,
+    demoLikedYou: !!p.demoLikedYou,
+    isDemo: !!row.is_demo,
+    tests: row.tests || {},
+  };
 }
 
 async function initDb() {
-  const schema = fs.readFileSync(path.join(__dirname, 'db', 'schema.sql'), 'utf8');
-  await pool.query(schema);
+  await pool.query(`CREATE SCHEMA IF NOT EXISTS constellation`);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS schema_versions(
+      version INT PRIMARY KEY,
+      applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS users(
+      id TEXT PRIMARY KEY,
+      email TEXT UNIQUE NOT NULL,
+      profile JSONB NOT NULL DEFAULT '{}'::jsonb,
+      completed_harmony BOOLEAN NOT NULL DEFAULT FALSE,
+      completed_after BOOLEAN NOT NULL DEFAULT FALSE,
+      version_harmony INT NOT NULL DEFAULT 1,
+      version_after INT NOT NULL DEFAULT 1,
+      settings JSONB NOT NULL DEFAULT '{"reminderValue":60,"reminderUnit":"minutes"}'::jsonb,
+      last_ip TEXT,
+      is_demo BOOLEAN NOT NULL DEFAULT FALSE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      last_seen TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS auth_codes(
+      email TEXT PRIMARY KEY,
+      code_hash TEXT NOT NULL,
+      expires_at TIMESTAMPTZ NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS sessions(
+      token_hash TEXT PRIMARY KEY,
+      user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+      is_admin BOOLEAN NOT NULL DEFAULT FALSE,
+      expires_at TIMESTAMPTZ NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS decisions(
+      from_user TEXT REFERENCES users(id) ON DELETE CASCADE,
+      to_user TEXT REFERENCES users(id) ON DELETE CASCADE,
+      mode TEXT NOT NULL CHECK(mode IN ('harmony','after')),
+      decision TEXT NOT NULL CHECK(decision IN ('like','pass')),
+      target_version INT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY(from_user,to_user,mode)
+    );
+    CREATE TABLE IF NOT EXISTS matches(
+      id TEXT PRIMARY KEY,
+      pair_key TEXT NOT NULL,
+      user1 TEXT REFERENCES users(id) ON DELETE CASCADE,
+      user2 TEXT REFERENCES users(id) ON DELETE CASCADE,
+      mode TEXT NOT NULL CHECK(mode IN ('harmony','after')),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(pair_key,mode)
+    );
+    CREATE TABLE IF NOT EXISTS messages(
+      id BIGSERIAL PRIMARY KEY,
+      match_id TEXT REFERENCES matches(id) ON DELETE CASCADE,
+      sender_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+      kind TEXT NOT NULL DEFAULT 'text',
+      body TEXT,
+      image_data TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS chat_preferences(
+      user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+      match_id TEXT REFERENCES matches(id) ON DELETE CASCADE,
+      pinned BOOLEAN NOT NULL DEFAULT FALSE,
+      muted BOOLEAN NOT NULL DEFAULT FALSE,
+      PRIMARY KEY(user_id,match_id)
+    );
+    CREATE TABLE IF NOT EXISTS blocks(
+      blocker_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+      blocked_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY(blocker_id,blocked_id)
+    );
+    CREATE TABLE IF NOT EXISTS dates(
+      id TEXT PRIMARY KEY,
+      match_id TEXT REFERENCES matches(id) ON DELETE CASCADE,
+      mode TEXT NOT NULL CHECK(mode IN ('harmony','after')),
+      proposer_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+      when_at TIMESTAMPTZ NOT NULL,
+      place TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','confirmed','declined','completed','cancelled')),
+      reminder_sent JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS notifications(
+      id BIGSERIAL PRIMARY KEY,
+      user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+      type TEXT NOT NULL,
+      payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+      read_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS tests(
+      id BIGSERIAL PRIMARY KEY,
+      user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+      type TEXT NOT NULL,
+      result TEXT NOT NULL,
+      answers JSONB NOT NULL DEFAULT '[]'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS reports(
+      id TEXT PRIMARY KEY,
+      reporter_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      reported_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      reason TEXT NOT NULL,
+      details TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'new',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS bans(
+      id TEXT PRIMARY KEY,
+      user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      ip_address TEXT,
+      reason TEXT NOT NULL,
+      banned_until TIMESTAMPTZ NOT NULL,
+      active BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      revoked_at TIMESTAMPTZ
+    );
+    CREATE TABLE IF NOT EXISTS appeals(
+      id TEXT PRIMARY KEY,
+      ban_id TEXT REFERENCES bans(id) ON DELETE CASCADE,
+      user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      email TEXT,
+      text TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'new',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS audit_log(
+      id BIGSERIAL PRIMARY KEY,
+      actor TEXT,
+      action TEXT NOT NULL,
+      target TEXT,
+      payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_sessions_exp ON sessions(expires_at);
+    CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id,created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_dates_when ON dates(when_at);
+    CREATE INDEX IF NOT EXISTS idx_bans_ip ON bans(ip_address,active,banned_until);
+    CREATE INDEX IF NOT EXISTS idx_bans_user ON bans(user_id,active,banned_until);
+    INSERT INTO schema_versions(version) VALUES (1) ON CONFLICT DO NOTHING;
+  `);
+  await seedDemoUsers();
 }
 
-app.set('trust proxy', 1);
-app.set('view engine', 'ejs');
-app.set('views', path.join(__dirname, 'views'));
-
-app.use(helmet({
-  contentSecurityPolicy: {
-    directives: {
-      defaultSrc: ["'self'"],
-      scriptSrc: ["'self'"],
-      styleSrc: ["'self'", "'unsafe-inline'"],
-      imgSrc: ["'self'", 'data:'],
-      connectSrc: ["'self'", 'ws:', 'wss:'],
-      formAction: ["'self'"],
-      frameAncestors: ["'none'"],
-    },
+const demoUsers = [
+  {
+    id:"demo-alina", email:"demo.alina@constellation.local", demoLikedYou:true,
+    common:{name:"Алина",birthDate:"2002-04-18",city:"Санкт-Петербург",gender:"woman",orientation:"bi",
+      photo:"https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=800&q=85",
+      tags:["art","books","coffee","nightowl"]},
+    harmony:{goal:"relations",bio:"Иллюстратор. Люблю небольшие выставки, прогулки без маршрута, хороший кофе и разговоры, после которых появляется новая идея.",hobbies:"Рисование, кино, книжные магазины",values:"Честность, любопытство, свобода",relationshipStyle:"Партнёрство и уважение личного пространства"},
+    after:{goal:"flirt",bio:"Люблю лёгкий флирт, красивые встречи и ясные договорённости.",pace:"Медленно",interests:"Флирт, свидания, игра с образом",taboos:"Давление, нарушение договорённостей",fetishes:["Игры с образом","Нижнее бельё","Флирт в переписке"]},
+    tests:{mbti:"INFP",attachment:"Secure",enneagram:"Тип 4",care:"Время вместе"}
   },
-  crossOriginResourcePolicy: { policy: 'same-site' },
-}));
-app.use(express.urlencoded({ extended: true, limit: '1mb' }));
-app.use(express.json({ limit: '1mb' }));
-app.use(express.static(path.join(__dirname, 'public'), { maxAge: isProduction ? '1d' : 0 }));
-
-const sessionMiddleware = session({
-  store: new pgSession({ pool, tableName: 'session', createTableIfMissing: false }),
-  secret: process.env.SESSION_SECRET || 'development-only-secret-change-me',
-  resave: false,
-  saveUninitialized: false,
-  rolling: true,
-  cookie: {
-    httpOnly: true,
-    sameSite: 'lax',
-    secure: isProduction,
-    maxAge: 1000 * 60 * 60 * 24 * 30,
+  {
+    id:"demo-mira", email:"demo.mira@constellation.local", demoLikedYou:false,
+    common:{name:"Мира",birthDate:"1999-09-03",city:"Москва",gender:"woman",orientation:"lesbian",
+      photo:"https://images.unsplash.com/photo-1524504388940-b1c1722653e1?auto=format&fit=crop&w=800&q=85",
+      tags:["music","travel","podcasts"]},
+    harmony:{goal:"friendship",bio:"Продюсер подкастов. Люблю концерты, поездки на выходные и людей, с которыми можно спокойно молчать.",hobbies:"Концерты, поездки, подкасты",values:"Уважение, самостоятельность, юмор",relationshipStyle:"Дружба и лёгкое знакомство без спешки"},
+    after:null,tests:{mbti:"ENTP",attachment:"Avoidant",enneagram:"Тип 7",care:"Слова поддержки"}
   },
-});
-app.use(sessionMiddleware);
-
-io.engine.use(sessionMiddleware);
-
-const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 40, standardHeaders: true, legacyHeaders: false });
-const writeLimiter = rateLimit({ windowMs: 60 * 1000, limit: 80, standardHeaders: true, legacyHeaders: false });
-
-app.use((req, res, next) => {
-  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method) && req.headers.origin) {
-    try {
-      const origin = new URL(req.headers.origin);
-      const expected = new URL(BASE_URL);
-      if (origin.host !== expected.host && isProduction) return res.status(403).send('Invalid origin');
-    } catch (_) {
-      if (isProduction) return res.status(403).send('Invalid origin');
-    }
+  {
+    id:"demo-sasha", email:"demo.sasha@constellation.local", demoLikedYou:true,
+    common:{name:"Саша",birthDate:"2001-01-29",city:"Белград",gender:"nonbinary",orientation:"pan",
+      photo:"https://images.unsplash.com/photo-1529139574466-a303027c1d8b?auto=format&fit=crop&w=800&q=85",
+      tags:["design","running","architecture","travel"]},
+    harmony:{goal:"relations",bio:"Работаю с интерфейсами, люблю архитектуру и бег. Нравятся люди, которые умеют строить планы и не боятся менять их.",hobbies:"Дизайн, бег, архитектура",values:"Открытость, гибкость, интерес к миру",relationshipStyle:"Партнёрство с большим количеством совместных планов"},
+    after:{goal:"dates",bio:"Люблю прямой флирт и встречи, где всё заранее проговорено.",pace:"По ситуации",interests:"Флирт, быстрые свидания",taboos:"Грубость, игнорирование границ",fetishes:["Ролевые сценарии","Массаж","Косплей"]},
+    tests:{mbti:"ENFP",attachment:"Secure",enneagram:"Тип 7",care:"Поступки и помощь"}
   }
-  next();
-});
+];
 
-function flash(req, type, message) {
-  req.session.flash = { type, message };
+async function seedDemoUsers() {
+  for (const u of demoUsers) {
+    const profile = { common:u.common, harmony:u.harmony, after:u.after, demoLikedYou:u.demoLikedYou, tests:u.tests };
+    await pool.query(`
+      INSERT INTO users(id,email,profile,completed_harmony,completed_after,is_demo)
+      VALUES($1,$2,$3,$4,$5,TRUE)
+      ON CONFLICT(id) DO UPDATE SET profile=EXCLUDED.profile, completed_harmony=EXCLUDED.completed_harmony,
+      completed_after=EXCLUDED.completed_after, updated_at=NOW()
+    `,[u.id,u.email,JSON.stringify(profile),!!u.harmony,!!u.after]);
+  }
 }
 
-app.use(async (req, res, next) => {
-  try {
-    res.locals.siteName = SITE_NAME;
-    res.locals.currentPath = req.path;
-    res.locals.flash = req.session.flash || null;
-    delete req.session.flash;
-    res.locals.user = null;
-    res.locals.unreadCount = 0;
-    res.locals.pendingFriendCount = 0;
-    res.locals.applicationStatusLabels = APPLICATION_STATUS_LABELS;
+async function sendCodeEmail(email, code) {
+  if (!BREVO_API_KEY || !BREVO_SENDER_EMAIL) return false;
+  const res = await fetch("https://api.brevo.com/v3/smtp/email", {
+    method:"POST",
+    headers:{"content-type":"application/json","api-key":BREVO_API_KEY},
+    body:JSON.stringify({
+      sender:{name:BREVO_SENDER_NAME,email:BREVO_SENDER_EMAIL},
+      to:[{email}],
+      subject:"Код входа в CONSTELLATION",
+      htmlContent:`<div style="font-family:Arial,sans-serif"><h2>Твой код входа</h2><div style="font-size:34px;font-weight:800;letter-spacing:6px">${code}</div><p>Код действует ${CODE_MINUTES} минут.</p></div>`
+    })
+  });
+  if (!res.ok) throw new Error("Brevo error "+res.status);
+  return true;
+}
+async function sendReminderEmail(email, name, whenAt, place) {
+  if (!BREVO_API_KEY || !BREVO_SENDER_EMAIL || !email || email.endsWith("@constellation.local")) return false;
+  const res = await fetch("https://api.brevo.com/v3/smtp/email", {
+    method:"POST",
+    headers:{"content-type":"application/json","api-key":BREVO_API_KEY},
+    body:JSON.stringify({
+      sender:{name:BREVO_SENDER_NAME,email:BREVO_SENDER_EMAIL},
+      to:[{email}],
+      subject:`Скоро встреча с ${name}`,
+      htmlContent:`<div style="font-family:Arial,sans-serif"><h2>Скоро встреча с ${name}</h2><p>${new Date(whenAt).toLocaleString("ru-RU")}</p><p>${place || "Место уточняется"}</p></div>`
+    })
+  });
+  return res.ok;
+}
 
-    if (req.session.userId) {
-      const { rows } = await q('SELECT * FROM users WHERE id=$1', [req.session.userId]);
-      const user = rows[0];
-      if (!user || user.is_banned) {
-        req.session.destroy(() => {});
-      } else {
-        req.user = user;
-        res.locals.user = user;
-        const unread = await q(`
-          SELECT COUNT(*)::int AS c
-          FROM messages m
-          WHERE m.receiver_id=$1 AND m.read_at IS NULL
-            AND NOT EXISTS (SELECT 1 FROM mutes mu WHERE mu.user_id=$1 AND mu.muted_user_id=m.sender_id)
-        `, [user.id]);
-        res.locals.unreadCount = unread.rows[0].c;
-        const pending = await q('SELECT COUNT(*)::int AS c FROM friendships WHERE addressee_id=$1 AND status=\'pending\'', [user.id]);
-        res.locals.pendingFriendCount = pending.rows[0].c;
-      }
-    }
+async function createSession(userId, isAdmin=false) {
+  const token = crypto.randomBytes(32).toString("hex");
+  const tokenHash = hash(token);
+  await pool.query(`INSERT INTO sessions(token_hash,user_id,is_admin,expires_at) VALUES($1,$2,$3,NOW()+INTERVAL '${SESSION_DAYS} days')`,
+    [tokenHash,userId||null,isAdmin]);
+  return token;
+}
+async function getSession(req) {
+  const raw = (req.headers.cookie||"").split(";").map(x=>x.trim()).find(x=>x.startsWith("sid="));
+  if (!raw) return null;
+  const token = decodeURIComponent(raw.slice(4));
+  const {rows} = await pool.query(`SELECT * FROM sessions WHERE token_hash=$1 AND expires_at>NOW()`,[hash(token)]);
+  return rows[0]||null;
+}
+function setSessionCookie(res, token) {
+  res.setHeader("Set-Cookie",`sid=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_DAYS*86400}; ${process.env.NODE_ENV==="production"?"Secure;":""}`);
+}
+async function requireUser(req,res,next) {
+  try {
+    const s = await getSession(req);
+    if (!s || !s.user_id || s.is_admin) return res.status(401).json({error:"auth_required"});
+    const {rows} = await pool.query(`SELECT * FROM users WHERE id=$1`,[s.user_id]);
+    if (!rows[0]) return res.status(401).json({error:"auth_required"});
+    req.user=rows[0]; req.session=s; next();
+  } catch(e){next(e)}
+}
+async function requireAdmin(req,res,next) {
+  try {
+    const s = await getSession(req);
+    if (!s || !s.is_admin) return res.status(401).json({error:"admin_required"});
+    req.session=s; next();
+  } catch(e){next(e)}
+}
+async function activeBanFor(ip,userId=null) {
+  const {rows}=await pool.query(`
+    SELECT * FROM bans WHERE active=TRUE AND banned_until>NOW()
+    AND (($1::text IS NOT NULL AND ip_address=$1) OR ($2::text IS NOT NULL AND user_id=$2))
+    ORDER BY banned_until DESC LIMIT 1
+  `,[ip||null,userId||null]);
+  return rows[0]||null;
+}
+app.use("/api", async (req,res,next)=>{
+  if (req.path.startsWith("/admin") || req.path==="/appeals" || req.path==="/ban-status" || req.path.startsWith("/auth")) return next();
+  try {
+    const s=await getSession(req);
+    const ban=await activeBanFor(ipOf(req),s?.user_id||null);
+    if (ban) return res.status(403).json({error:"banned",ban:{
+      id:ban.id,reason:ban.reason,bannedUntil:ban.banned_until,remainingMs:Math.max(0,new Date(ban.banned_until)-Date.now())
+    }});
     next();
-  } catch (err) {
-    next(err);
-  }
+  } catch(e){next(e)}
 });
 
-function requireAuth(req, res, next) {
-  if (!req.user) {
-    req.session.returnTo = req.originalUrl;
-    flash(req, 'info', 'Сначала войдите в аккаунт.');
-    return res.redirect('/login');
-  }
-  next();
-}
-
-function requireAdmin(req, res, next) {
-  if (!req.user || req.user.role !== 'admin') return res.status(403).render('error', { title: 'Нет доступа', message: 'Эта зона только для администратора.' });
-  next();
-}
-
-function cleanText(value, max = 5000) {
-  return String(value || '').trim().slice(0, max);
-}
-
-function safeHttpUrl(value) {
-  const raw = cleanText(value, 1200);
-  try {
-    const u = new URL(raw);
-    return ['http:', 'https:'].includes(u.protocol) ? u.toString() : '';
-  } catch (_) { return ''; }
-}
-
-function decodeHtmlEntities(value) {
-  const named = {
-    amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ',
-    ndash: '–', mdash: '—', hellip: '…', laquo: '«', raquo: '»',
-  };
-  return String(value || '').replace(/&(#x?[0-9a-f]+|[a-z]+);/gi, (match, entity) => {
-    if (entity[0] === '#') {
-      const hex = entity[1] && entity[1].toLowerCase() === 'x';
-      const code = parseInt(entity.slice(hex ? 2 : 1), hex ? 16 : 10);
-      return Number.isFinite(code) ? String.fromCodePoint(code) : match;
-    }
-    return Object.prototype.hasOwnProperty.call(named, entity.toLowerCase()) ? named[entity.toLowerCase()] : match;
-  });
-}
-
-function stripHtml(value) {
-  const decoded = decodeHtmlEntities(value);
-  return decodeHtmlEntities(sanitizeHtml(decoded, { allowedTags: [], allowedAttributes: {} }))
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function safeRichHtml(value) {
-  return sanitizeHtml(decodeHtmlEntities(value), {
-    allowedTags: ['p','br','ul','ol','li','strong','b','em','i','h2','h3','h4','blockquote','a','code','pre'],
-    allowedAttributes: { a: ['href','target','rel'] },
-    allowedSchemes: ['http','https','mailto'],
-    transformTags: {
-      a: sanitizeHtml.simpleTransform('a', { target: '_blank', rel: 'noopener noreferrer' }),
-    },
-  });
-}
-
-
-function normalizedField(value, max = 240) {
-  return cleanText(stripHtml(value), max);
-}
-
-function inferWorkMode({ remote, title = '', description = '', tags = [], location = '' }) {
-  const haystack = `${title} ${description} ${Array.isArray(tags) ? tags.join(' ') : tags} ${location}`.toLowerCase();
-  if (/\bhybrid\b|гибрид|hybride|[1-4]\s+days?[^.]{0,35}(office|on[- ]?site)|(office|on[- ]?site)[^.]{0,35}[1-4]\s+days?/.test(haystack)) return 'Hybrid';
-  if (remote === true) return 'Remote';
-  if (remote == null && /\bremote\b|home[ -]?office|work from home|fully remote/.test(haystack)) return 'Remote';
-  return 'Office';
-}
-
-const EXPERIENCE_BANDS = ['Без опыта', '1–3 года', '3–6 лет', '6+ лет'];
-
-function inferExperienceBand(title = '', tags = [], description = '') {
-  const haystack = `${title} ${Array.isArray(tags) ? tags.join(' ') : tags} ${stripHtml(description)}`.toLowerCase();
-  const yearMatches = [...haystack.matchAll(/(\d{1,2})(?:\s*[–—-]\s*(\d{1,2}))?\s*(\+)?\s*(?:years?|yrs?|лет|года|год)/g)];
-  if (yearMatches.length) {
-    let strongestBand = '';
-    for (const match of yearMatches) {
-      const min = Number(match[1] || 0);
-      const max = Number(match[2] || 0);
-      const plus = Boolean(match[3]);
-      let band = '';
-      if (min >= 6 || max >= 7) band = '6+ лет';
-      else if (min >= 3 || (plus && min >= 3) || max > 3) band = '3–6 лет';
-      else if (min >= 1 || max >= 1) band = '1–3 года';
-      else band = 'Без опыта';
-      if (band === '6+ лет') return band;
-      if (band === '3–6 лет') strongestBand = band;
-      else if (!strongestBand && band) strongestBand = band;
-    }
-    if (strongestBand) return strongestBand;
-  }
-  if (/no experience|без опыта|intern|internship|trainee|стаж|graduate|entry[ -]?level/.test(haystack)) return 'Без опыта';
-  if (/junior|jr\.?\b/.test(haystack)) return '1–3 года';
-  if (/middle|mid[ -]?level/.test(haystack)) return '3–6 лет';
-  if (/senior|sr\.?\b|principal|staff|lead|head|director|vp\b/.test(haystack)) return '6+ лет';
-  return '';
-}
-
-function looksRussian(value) {
-  const text = String(value || '');
-  if (!text) return false;
-  const letters = text.match(/[A-Za-zА-Яа-яЁё]/g) || [];
-  const cyr = text.match(/[А-Яа-яЁё]/g) || [];
-  return letters.length > 0 && cyr.length / letters.length >= 0.35;
-}
-
-const translationCache = new Map();
-async function translateSummaryToRussian(value) {
-  const text = cleanText(stripHtml(value), 500);
-  if (!text || looksRussian(text)) return text;
-  if (translationCache.has(text)) return translationCache.get(text);
-  try {
-    const url = new URL('https://translate.googleapis.com/translate_a/single');
-    url.searchParams.set('client', 'gtx');
-    url.searchParams.set('sl', 'auto');
-    url.searchParams.set('tl', 'ru');
-    url.searchParams.set('dt', 't');
-    url.searchParams.set('q', text);
-    const response = await fetch(url, { headers: { 'User-Agent': `${SITE_NAME}/1.0` }, signal: AbortSignal.timeout(9000) });
-    if (!response.ok) throw new Error(`translate HTTP ${response.status}`);
-    const payload = await response.json();
-    const translated = cleanText(Array.isArray(payload?.[0]) ? payload[0].map(part => part?.[0] || '').join('') : '', 500);
-    const result = translated || text;
-    translationCache.set(text, result);
-    return result;
-  } catch (err) {
-    console.warn('[jobs] summary translation skipped:', err.message);
-    translationCache.set(text, text);
-    return text;
-  }
-}
-
-async function mapWithConcurrency(items, limit, worker) {
-  const queue = [...items];
-  const workers = Array.from({ length: Math.max(1, Math.min(limit, items.length || 1)) }, async () => {
-    while (queue.length) {
-      const item = queue.shift();
-      await worker(item);
-    }
-  });
-  await Promise.all(workers);
-}
-
-async function normalizeExistingJobExperience() {
-  const { rows } = await q(`SELECT id,title,experience,description_html FROM jobs WHERE is_active=TRUE`);
-  const updates = [];
-  for (const row of rows) {
-    if (EXPERIENCE_BANDS.includes(row.experience)) continue;
-    const band = inferExperienceBand(row.title, [row.experience || ''], row.description_html || '');
-    if (band && band !== row.experience) updates.push({ id: row.id, band });
-  }
-  await mapWithConcurrency(updates, 8, ({ id, band }) => q('UPDATE jobs SET experience=$1 WHERE id=$2', [band, id]));
-}
-
-async function backfillRussianSummaries(limit = 320) {
-  const { rows } = await q(`SELECT id,summary FROM jobs WHERE is_active=TRUE AND COALESCE(summary,'')<>'' AND COALESCE(summary_ru,'')='' ORDER BY COALESCE(published_at,created_at) DESC LIMIT $1`, [limit]);
-  await mapWithConcurrency(rows, 5, async (job) => {
-    const translated = await translateSummaryToRussian(job.summary);
-    await q('UPDATE jobs SET summary_ru=$1 WHERE id=$2', [translated, job.id]);
-  });
-  if (rows.length) console.log(`[jobs] translated ${rows.length} short summaries to Russian`);
-}
-
-function normalizeSector(title = '', tags = [], description = '') {
-  const haystack = `${title} ${Array.isArray(tags) ? tags.join(' ') : tags} ${description}`.toLowerCase();
-  const rules = [
-    ['GameDev', /game|gaming|unity|unreal|gamedev|игр/],
-    ['UI/UX', /ui\b|ux\b|user experience|product design|interaction design/],
-    ['Graphic Design', /graphic|brand design|visual design|illustrat|motion design|creative design/],
-    ['Data / AI', /machine learning|artificial intelligence|\bai\b|data scientist|data engineer|analytics|llm/],
-    ['Engineering', /software|developer|engineer|frontend|front-end|backend|back-end|fullstack|full-stack|devops|qa\b|cyber|security|ios|android|java|python|javascript|typescript|react|node/],
-    ['Product', /product manager|product owner|product management/],
-    ['Marketing', /marketing|growth|seo|content|social media|performance|crm|communications|copywriter/],
-    ['Sales', /sales|business development|account executive|customer success/],
-    ['Finance', /finance|accounting|fintech|financial/],
-  ];
-  for (const [label, re] of rules) if (re.test(haystack)) return label;
-  if (Array.isArray(tags) && tags.length) return normalizedField(tags[0], 80) || 'Digital';
-  return 'Digital';
-}
-
-function isRelevantDigitalJob(title = '', tags = [], _description = '') {
-  const haystack = `${title} ${Array.isArray(tags) ? tags.join(' ') : tags}`.toLowerCase();
-  return /(design|designer|ux\b|ui\b|product|software|developer|engineer|frontend|backend|fullstack|devops|data|machine learning|artificial intelligence|\bai\b|marketing|growth|seo|game|gaming|creative|content|brand|motion|qa\b|cyber|security|mobile|ios|android|fintech|sales|customer success)/.test(haystack);
-}
-
-async function attachApplicationStatuses(user, jobs) {
-  if (!user || !jobs.length) return jobs;
-  const ids = jobs.map(j => Number(j.id)).filter(Number.isFinite);
-  if (!ids.length) return jobs;
-  const { rows } = await q('SELECT job_id,status FROM applications WHERE user_id=$1 AND job_id=ANY($2::bigint[])', [user.id, ids]);
-  const statusByJob = new Map(rows.map(r => [String(r.job_id), r.status]));
-  return jobs.map(job => ({ ...job, application_status: statusByJob.get(String(job.id)) || null }));
-}
-
-function slugify(value) {
-  const s = String(value || '').toLowerCase().trim()
-    .replace(/[^a-z0-9а-яё_-]+/gi, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 60);
-  return s || `group-${crypto.randomBytes(4).toString('hex')}`;
-}
-
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 5 * 1024 * 1024 },
-  fileFilter: (_req, file, cb) => {
-    const ok = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(file.mimetype);
-    cb(ok ? null : new Error('Поддерживаются JPG, PNG, WEBP и GIF.'), ok);
-  },
+app.post("/api/auth/request-code", async(req,res,next)=>{
+  try{
+    const email=safeEmail(req.body.email);
+    if(!email || !email.includes("@")) return res.status(400).json({error:"invalid_email"});
+    const code = ALLOW_DEMO_AUTH && !BREVO_API_KEY ? DEMO_CODE : String(Math.floor(100000+Math.random()*900000));
+    await pool.query(`INSERT INTO auth_codes(email,code_hash,expires_at) VALUES($1,$2,NOW()+INTERVAL '${CODE_MINUTES} minutes')
+      ON CONFLICT(email) DO UPDATE SET code_hash=EXCLUDED.code_hash,expires_at=EXCLUDED.expires_at,created_at=NOW()`,
+      [email,hash(code+AUTH_PEPPER)]);
+    let sent=false;
+    try{sent=await sendCodeEmail(email,code)}catch(e){console.error(e)}
+    res.json({ok:true,delivery:sent?"email":"demo",demoCode:(!sent&&ALLOW_DEMO_AUTH)?DEMO_CODE:undefined});
+  }catch(e){next(e)}
+});
+app.post("/api/auth/verify-code", async(req,res,next)=>{
+  try{
+    const email=safeEmail(req.body.email),code=String(req.body.code||"").trim();
+    const {rows}=await pool.query(`SELECT * FROM auth_codes WHERE email=$1 AND expires_at>NOW()`,[email]);
+    if(!rows[0] || rows[0].code_hash!==hash(code+AUTH_PEPPER)) return res.status(400).json({error:"invalid_code"});
+    await pool.query(`DELETE FROM auth_codes WHERE email=$1`,[email]);
+    let u=(await pool.query(`SELECT * FROM users WHERE email=$1`,[email])).rows[0];
+    if(!u){
+      const uid=id();
+      await pool.query(`INSERT INTO users(id,email,last_ip) VALUES($1,$2,$3)`,[uid,email,ipOf(req)]);
+      u=(await pool.query(`SELECT * FROM users WHERE id=$1`,[uid])).rows[0];
+    }else await pool.query(`UPDATE users SET last_ip=$2,last_seen=NOW() WHERE id=$1`,[u.id,ipOf(req)]);
+    const ban=await activeBanFor(ipOf(req),u.id);
+    if(ban) return res.status(403).json({error:"banned",ban:{id:ban.id,reason:ban.reason,bannedUntil:ban.banned_until}});
+    const token=await createSession(u.id,false);setSessionCookie(res,token);res.json({ok:true});
+  }catch(e){next(e)}
+});
+app.post("/api/logout", async(req,res,next)=>{
+  try{const s=await getSession(req);if(s)await pool.query(`DELETE FROM sessions WHERE token_hash=$1`,[s.token_hash]);res.setHeader("Set-Cookie","sid=; Path=/; HttpOnly; Max-Age=0");res.json({ok:true})}catch(e){next(e)}
+});
+app.get("/api/ban-status", async(req,res,next)=>{
+  try{const s=await getSession(req);const ban=await activeBanFor(ipOf(req),s?.user_id||null);res.json({ban:ban?{id:ban.id,reason:ban.reason,bannedUntil:ban.banned_until}:null})}catch(e){next(e)}
+});
+app.post("/api/appeals", async(req,res,next)=>{
+  try{
+    const s=await getSession(req),ban=await activeBanFor(ipOf(req),s?.user_id||null);
+    if(!ban)return res.status(400).json({error:"no_active_ban"});
+    const text=String(req.body.text||"").trim(); if(!text)return res.status(400).json({error:"text_required"});
+    let email=s?.user_id?(await pool.query(`SELECT email FROM users WHERE id=$1`,[s.user_id])).rows[0]?.email:null;
+    await pool.query(`INSERT INTO appeals(id,ban_id,user_id,email,text) VALUES($1,$2,$3,$4,$5)`,[id(),ban.id,s?.user_id||null,email||safeEmail(req.body.email),text]);
+    res.json({ok:true});
+  }catch(e){next(e)}
 });
 
-async function saveMedia(userId, file) {
-  if (!file) return null;
-  const { rows } = await q(
-    'INSERT INTO media(owner_id,mime,size_bytes,data) VALUES($1,$2,$3,$4) RETURNING id',
-    [userId, file.mimetype, file.size, file.buffer]
-  );
-  return rows[0].id;
-}
-
-async function areFriends(a, b) {
-  if (!a || !b || Number(a) === Number(b)) return Number(a) === Number(b);
-  const { rowCount } = await q(`
-    SELECT 1 FROM friendships
-    WHERE status='accepted'
-      AND ((requester_id=$1 AND addressee_id=$2) OR (requester_id=$2 AND addressee_id=$1))
-    LIMIT 1
-  `, [a, b]);
-  return rowCount > 0;
-}
-
-async function friendshipBetween(a, b) {
-  const { rows } = await q(`
-    SELECT * FROM friendships
-    WHERE (requester_id=$1 AND addressee_id=$2) OR (requester_id=$2 AND addressee_id=$1)
-    ORDER BY id DESC LIMIT 1
-  `, [a, b]);
-  return rows[0] || null;
-}
-
-async function blockedEitherWay(a, b) {
-  const { rowCount } = await q(`
-    SELECT 1 FROM blocks
-    WHERE (blocker_id=$1 AND blocked_id=$2) OR (blocker_id=$2 AND blocked_id=$1)
-    LIMIT 1
-  `, [a, b]);
-  return rowCount > 0;
-}
-
-function verificationMail(email, code, token) {
-  const link = `${BASE_URL}/verify?token=${encodeURIComponent(token)}`;
-  return {
-    subject: `${SITE_NAME}: подтвердите почту`,
-    text: `Код подтверждения: ${code}\n\nИли откройте ссылку: ${link}\nКод действует 30 минут.`,
-    html: `<div style="font-family:Arial,sans-serif;max-width:560px;margin:auto"><h1>${SITE_NAME}</h1><p>Код подтверждения:</p><div style="font-size:36px;font-weight:700;letter-spacing:8px">${code}</div><p style="margin:28px 0"><a href="${link}" style="background:#111;color:#fff;padding:14px 18px;text-decoration:none;border-radius:999px">Подтвердить аккаунт</a></p><p>Код и ссылка действуют 30 минут.</p></div>`,
-  };
-}
-
-async function sendVerification(email, code, token) {
-  const mail = verificationMail(email, code, token);
-
-  // HTTPS email delivery works on Render Free, where common SMTP ports are blocked.
-  if (process.env.RESEND_API_KEY) {
-    const from = cleanText(process.env.RESEND_FROM || process.env.SMTP_FROM, 240);
-    if (!from) throw new Error('RESEND_FROM is required when RESEND_API_KEY is configured.');
-    const response = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ from, to: [email], subject: mail.subject, text: mail.text, html: mail.html }),
-      signal: AbortSignal.timeout(15000),
-    });
-    if (!response.ok) {
-      const detail = cleanText(await response.text(), 1000);
-      throw new Error(`Email API error ${response.status}: ${detail}`);
+app.get("/api/me", requireUser, async(req,res,next)=>{
+  try{
+    const tests=(await pool.query(`SELECT DISTINCT ON(type) type,result,created_at FROM tests WHERE user_id=$1 ORDER BY type,created_at DESC`,[req.user.id])).rows;
+    const testMap=Object.fromEntries(tests.map(t=>[t.type,{result:t.result,lastAt:t.created_at}]));
+    res.json({user:{
+      id:req.user.id,email:req.user.email,profile:req.user.profile,completedHarmony:req.user.completed_harmony,completedAfter:req.user.completed_after,
+      versionHarmony:req.user.version_harmony,versionAfter:req.user.version_after,settings:req.user.settings,createdAt:req.user.created_at,tests:testMap
+    }});
+  }catch(e){next(e)}
+});
+app.put("/api/me/profile", requireUser, async(req,res,next)=>{
+  try{
+    const profile=req.body.profile||{},mode=req.body.mode;
+    if(!modeOk(mode))return res.status(400).json({error:"bad_mode"});
+    const old=req.user.profile||{}, newP={...old,...profile};
+    const oldBlock=JSON.stringify(old[mode]||{}),newBlock=JSON.stringify(newP[mode]||{});
+    const bump=oldBlock!==newBlock;
+    const common=newP.common||{};
+    if(!common.name||!common.birthDate||!common.city||!common.photo)return res.status(400).json({error:"profile_incomplete"});
+    if(mode==="harmony"){
+      await pool.query(`UPDATE users SET profile=$2,completed_harmony=TRUE,version_harmony=version_harmony+$3,updated_at=NOW(),last_ip=$4 WHERE id=$1`,
+        [req.user.id,JSON.stringify(newP),bump?1:0,ipOf(req)]);
+    }else{
+      await pool.query(`UPDATE users SET profile=$2,completed_after=TRUE,version_after=version_after+$3,updated_at=NOW(),last_ip=$4 WHERE id=$1`,
+        [req.user.id,JSON.stringify(newP),bump?1:0,ipOf(req)]);
     }
-    return { dev: false };
-  }
+    await pool.query(`INSERT INTO audit_log(actor,action,target,payload) VALUES($1,'profile_update',$1,$2)`,[req.user.id,JSON.stringify({mode,bump})]);
+    res.json({ok:true});
+  }catch(e){next(e)}
+});
+app.put("/api/me/settings", requireUser, async(req,res,next)=>{
+  try{
+    const value=Math.max(1,Number(req.body.reminderValue||60)),unit=["minutes","hours","days"].includes(req.body.reminderUnit)?req.body.reminderUnit:"minutes";
+    const settings={...(req.user.settings||{}),reminderValue:value,reminderUnit:unit};
+    await pool.query(`UPDATE users SET settings=$2,updated_at=NOW() WHERE id=$1`,[req.user.id,JSON.stringify(settings)]);
+    res.json({ok:true,settings});
+  }catch(e){next(e)}
+});
 
-  if (process.env.SMTP_HOST && process.env.SMTP_USER) {
-    const transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: Number(process.env.SMTP_PORT || 587),
-      secure: String(process.env.SMTP_SECURE) === 'true',
-      auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
-    });
-    await transporter.sendMail({
-      from: process.env.SMTP_FROM || process.env.SMTP_USER,
-      to: email,
-      ...mail,
-    });
-    return { dev: false };
-  }
-
-  if (!isProduction) {
-    console.log(`\n[DEV MAIL] ${email}\nCODE: ${code}\nLINK: ${BASE_URL}/verify?token=${token}\n`);
-    return { dev: true };
-  }
-
-  throw new Error('Email delivery is not configured. Set RESEND_API_KEY + RESEND_FROM or SMTP settings.');
-}
-
-async function createVerificationForUser(user) {
-  const code = String(crypto.randomInt(100000, 1000000));
-  const token = crypto.randomBytes(32).toString('hex');
-  const expires = new Date(Date.now() + 30 * 60 * 1000);
-  await q('UPDATE users SET verification_code=$1, verification_token=$2, verification_expires=$3 WHERE id=$4', [code, token, expires, user.id]);
-  const result = await sendVerification(user.email, code, token);
-  return { code, token, dev: result.dev };
-}
-
-async function importJobicy() {
-  if (String(process.env.ENABLE_JOB_IMPORT || 'true') !== 'true') return 0;
-  try {
-    const response = await fetch('https://jobicy.com/api/v2/remote-jobs?count=100', { headers: { 'User-Agent': `${SITE_NAME}/1.0` }, signal: AbortSignal.timeout(15000) });
-    if (!response.ok) throw new Error(`Jobicy HTTP ${response.status}`);
-    const data = await response.json();
-    const jobs = Array.isArray(data.jobs) ? data.jobs : [];
-    for (const job of jobs) {
-      const url = job.url || job.jobUrl;
-      if (!url) continue;
-      const title = normalizedField(job.jobTitle || job.title, 240);
-      const company = normalizedField(job.companyName || job.company || 'Компания', 180);
-      const descRaw = job.jobDescription || job.description || '';
-      const descriptionHtml = safeRichHtml(descRaw);
-      const excerpt = normalizedField(job.jobExcerpt || stripHtml(descRaw).slice(0, 420), 500);
-      let salary = normalizedField(job.salary || '', 120);
-      if (!salary && (job.annualSalaryMin || job.annualSalaryMax)) {
-        const min = job.annualSalaryMin || '?';
-        const max = job.annualSalaryMax || '?';
-        salary = `${job.salaryCurrency || ''} ${min}–${max}/yr`.trim();
-      }
-      const published = job.pubDate ? new Date(job.pubDate) : new Date();
-      const sector = normalizedField(job.jobIndustry || job.industry || '', 120) || normalizeSector(title, [], descRaw);
-      await q(`
-        INSERT INTO jobs(external_id,source,source_url,title,company,summary,description_html,experience,work_mode,salary,location,sector,employment_type,published_at,is_active,updated_at)
-        VALUES($1,'Jobicy',$2,$3,$4,$5,$6,$7,'Remote',$8,$9,$10,$11,$12,TRUE,NOW())
-        ON CONFLICT(source_url) DO UPDATE SET
-          title=EXCLUDED.title, company=EXCLUDED.company,
-          summary_ru=CASE WHEN jobs.summary IS DISTINCT FROM EXCLUDED.summary THEN NULL ELSE jobs.summary_ru END,
-          summary=EXCLUDED.summary, description_html=EXCLUDED.description_html, experience=EXCLUDED.experience,
-          work_mode=EXCLUDED.work_mode, salary=EXCLUDED.salary, location=EXCLUDED.location, sector=EXCLUDED.sector,
-          employment_type=EXCLUDED.employment_type, published_at=EXCLUDED.published_at,
-          is_active=TRUE, updated_at=NOW()
-      `, [
-        cleanText(job.id || job.jobId || '', 100), url, title, company, excerpt, descriptionHtml,
-        inferExperienceBand(title, [job.jobLevel || job.level || ''], descRaw), salary,
-        normalizedField(job.jobGeo || job.location || 'Worldwide', 160), sector,
-        normalizedField(job.jobType || job.employmentType || '', 100), published,
-      ]);
-    }
-    console.log(`[jobs] Jobicy import complete: ${jobs.length} records checked`);
-    return jobs.length;
-  } catch (err) {
-    console.error('[jobs] Jobicy import failed:', err.message);
-    return 0;
-  }
-}
-
-async function importArbeitnow() {
-  if (String(process.env.ENABLE_JOB_IMPORT || 'true') !== 'true') return 0;
-  const pages = Math.max(1, Math.min(8, Number(process.env.ARBEITNOW_IMPORT_PAGES || 4)));
-  let imported = 0;
-  try {
-    for (let page = 1; page <= pages; page += 1) {
-      const response = await fetch(`https://www.arbeitnow.com/api/job-board-api?page=${page}`, { headers: { 'User-Agent': `${SITE_NAME}/1.0` }, signal: AbortSignal.timeout(15000) });
-      if (!response.ok) throw new Error(`Arbeitnow HTTP ${response.status}`);
-      const payload = await response.json();
-      const jobs = Array.isArray(payload.data) ? payload.data : [];
-      for (const job of jobs) {
-        const title = normalizedField(job.title || '', 240);
-        const company = normalizedField(job.company_name || job.company || 'Компания', 180);
-        const tags = Array.isArray(job.tags) ? job.tags.map(x => normalizedField(x, 80)).filter(Boolean) : [];
-        const jobTypes = Array.isArray(job.job_types) ? job.job_types.map(x => normalizedField(x, 80)).filter(Boolean) : [];
-        const descRaw = job.description || '';
-        if (!title || !isRelevantDigitalJob(title, tags, descRaw)) continue;
-        const url = safeHttpUrl(job.url || '');
-        if (!url) continue;
-        const location = normalizedField(job.location || 'Germany', 160) || 'Germany';
-        const workMode = inferWorkMode({ remote: Boolean(job.remote), title, description: descRaw, tags, location });
-        const sector = normalizeSector(title, tags, descRaw);
-        const experience = inferExperienceBand(title, tags, descRaw);
-        const descriptionHtml = safeRichHtml(descRaw);
-        const excerpt = normalizedField(stripHtml(descRaw).slice(0, 430), 500);
-        let published = new Date();
-        if (job.created_at) {
-          const raw = Number(job.created_at);
-          const candidate = Number.isFinite(raw) ? new Date(raw < 10_000_000_000 ? raw * 1000 : raw) : new Date(job.created_at);
-          if (!Number.isNaN(candidate.getTime())) published = candidate;
+app.get("/api/discover", requireUser, async(req,res,next)=>{
+  try{
+    const mode=modeOk(req.query.mode)?req.query.mode:"harmony";
+    const col=mode==="harmony"?"completed_harmony":"completed_after";
+    const ver=mode==="harmony"?"version_harmony":"version_after";
+    const {rows}=await pool.query(`
+      SELECT u.*,
+        COALESCE((
+          SELECT jsonb_object_agg(t.type,t.result) FROM (
+            SELECT DISTINCT ON(type) type,result FROM tests WHERE user_id=u.id ORDER BY type,created_at DESC
+          ) t
+        ),'{}'::jsonb) AS tests
+      FROM users u
+      LEFT JOIN decisions d ON d.from_user=$1 AND d.to_user=u.id AND d.mode=$2
+      WHERE u.id<>$1 AND u.${col}=TRUE
+        AND NOT EXISTS(SELECT 1 FROM bans b WHERE b.active=TRUE AND b.user_id=u.id AND b.banned_until>NOW())
+        AND NOT EXISTS(SELECT 1 FROM blocks bl WHERE bl.blocker_id=$1 AND bl.blocked_id=u.id)
+        AND NOT EXISTS(SELECT 1 FROM blocks bl2 WHERE bl2.blocker_id=u.id AND bl2.blocked_id=$1)
+        AND (d.to_user IS NULL OR d.target_version<>u.${ver})
+      ORDER BY u.is_demo DESC,u.updated_at DESC
+      LIMIT 60
+    `,[req.user.id,mode]);
+    let list=rows.map(r=>publicProfile(r,mode));
+    const min=Number(req.query.ageMin||18),max=Number(req.query.ageMax||99);
+    const age=(b)=>{const d=new Date(b),n=new Date();let a=n.getFullYear()-d.getFullYear();const md=n.getMonth()-d.getMonth();if(md<0||(md===0&&n.getDate()<d.getDate()))a--;return a};
+    list=list.filter(u=>age(u.birthDate)>=min&&age(u.birthDate)<=max);
+    if(req.query.city)list=list.filter(u=>(u.city||"").toLowerCase().includes(String(req.query.city).toLowerCase()));
+    if(req.query.gender&&req.query.gender!=="all")list=list.filter(u=>u.gender===req.query.gender);
+    if(req.query.orientation&&req.query.orientation!=="all")list=list.filter(u=>u.orientation===req.query.orientation);
+    if(req.query.tag)list=list.filter(u=>(u.tags||[]).some(t=>String(t).toLowerCase().includes(String(req.query.tag).toLowerCase())));
+    res.json({users:list});
+  }catch(e){next(e)}
+});
+app.post("/api/decision", requireUser, async(req,res,next)=>{
+  const client=await pool.connect();
+  try{
+    const mode=req.body.mode,target=String(req.body.targetUserId||""),decision=req.body.decision;
+    if(!modeOk(mode)||!["like","pass"].includes(decision))return res.status(400).json({error:"bad_request"});
+    const targetRow=(await client.query(`SELECT * FROM users WHERE id=$1`,[target])).rows[0];
+    if(!targetRow)return res.status(404).json({error:"user_not_found"});
+    const tv=mode==="harmony"?targetRow.version_harmony:targetRow.version_after;
+    await client.query("BEGIN");
+    await client.query(`INSERT INTO decisions(from_user,to_user,mode,decision,target_version) VALUES($1,$2,$3,$4,$5)
+      ON CONFLICT(from_user,to_user,mode) DO UPDATE SET decision=EXCLUDED.decision,target_version=EXCLUDED.target_version,created_at=NOW()`,
+      [req.user.id,target,mode,decision,tv]);
+    let match=null;
+    if(decision==="like"){
+      const myVer=mode==="harmony"?req.user.version_harmony:req.user.version_after;
+      const reverse=(await client.query(`SELECT decision,target_version FROM decisions WHERE from_user=$1 AND to_user=$2 AND mode=$3`,[target,req.user.id,mode])).rows[0];
+      const demoLike=!!targetRow.profile?.demoLikedYou;
+      if((reverse&&reverse.decision==="like"&&reverse.target_version===myVer)||demoLike){
+        const pk=pairKey(req.user.id,target);
+        const existing=(await client.query(`SELECT * FROM matches WHERE pair_key=$1 AND mode=$2`,[pk,mode])).rows[0];
+        if(existing) match=existing;
+        else{
+          const mid=id();
+          match=(await client.query(`INSERT INTO matches(id,pair_key,user1,user2,mode) VALUES($1,$2,$3,$4,$5) RETURNING *`,
+            [mid,pk,req.user.id,target,mode])).rows[0];
+          await client.query(`INSERT INTO messages(match_id,sender_id,kind,body) VALUES($1,NULL,'system','Мэтч случился ✦ Можно начинать разговор.')`,[mid]);
+          await client.query(`INSERT INTO notifications(user_id,type,payload) VALUES($1,'match',$2),($3,'match',$4)`,
+            [req.user.id,JSON.stringify({matchId:mid,otherUserId:target,mode}),target,JSON.stringify({matchId:mid,otherUserId:req.user.id,mode})]);
         }
-        await q(`
-          INSERT INTO jobs(external_id,source,source_url,title,company,summary,description_html,experience,work_mode,salary,location,sector,employment_type,published_at,is_active,updated_at)
-          VALUES($1,'Arbeitnow',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,TRUE,NOW())
-          ON CONFLICT(source_url) DO UPDATE SET
-            title=EXCLUDED.title, company=EXCLUDED.company,
-            summary_ru=CASE WHEN jobs.summary IS DISTINCT FROM EXCLUDED.summary THEN NULL ELSE jobs.summary_ru END,
-            summary=EXCLUDED.summary, description_html=EXCLUDED.description_html, experience=EXCLUDED.experience,
-            work_mode=EXCLUDED.work_mode, location=EXCLUDED.location, sector=EXCLUDED.sector,
-            employment_type=EXCLUDED.employment_type, published_at=EXCLUDED.published_at,
-            is_active=TRUE, updated_at=NOW()
-        `, [
-          cleanText(job.slug || job.id || '', 120), url, title, company, excerpt, descriptionHtml,
-          experience, workMode, '', location, sector, jobTypes.join(', '), published,
-        ]);
-        imported += 1;
       }
-      if (!jobs.length) break;
     }
-    console.log(`[jobs] Arbeitnow import complete: ${imported} relevant records imported`);
-    return imported;
-  } catch (err) {
-    console.error('[jobs] Arbeitnow import failed:', err.message);
-    return imported;
-  }
+    await client.query("COMMIT");
+    if(match && target.startsWith("demo-")){
+      setTimeout(async()=>{try{
+        const existing=(await pool.query(`SELECT id FROM dates WHERE match_id=$1 AND proposer_id=$2 AND status='pending' LIMIT 1`,[match.id,target])).rows[0];
+        if(!existing){
+          const when=new Date(Date.now()+2*DAY);
+          when.setHours(19,0,0,0);
+          const did=id();
+          await pool.query(`INSERT INTO dates(id,match_id,mode,proposer_id,when_at,place,status) VALUES($1,$2,$3,$4,$5,$6,'pending')`,
+            [did,match.id,mode,target,when.toISOString(),"Кофейня на выбор"]);
+          await pool.query(`INSERT INTO notifications(user_id,type,payload) VALUES($1,'meeting_request',$2)`,
+            [req.user.id,JSON.stringify({dateId:did,matchId:match.id,mode,from:target})]);
+        }
+      }catch(e){console.error(e)}},5000);
+    }
+    res.json({ok:true,match});
+  }catch(e){await client.query("ROLLBACK");next(e)}finally{client.release()}
+});
+
+app.post("/api/block", requireUser, async(req,res,next)=>{
+  try{
+    const target=String(req.body.targetUserId||"");
+    if(!target||target===req.user.id)return res.status(400).json({error:"bad_target"});
+    await pool.query(`INSERT INTO blocks(blocker_id,blocked_id) VALUES($1,$2) ON CONFLICT DO NOTHING`,[req.user.id,target]);
+    const {rows}=await pool.query(`SELECT id FROM matches WHERE (user1=$1 AND user2=$2) OR (user1=$2 AND user2=$1)`,[req.user.id,target]);
+    for(const m of rows) await pool.query(`DELETE FROM matches WHERE id=$1`,[m.id]);
+    await pool.query(`INSERT INTO audit_log(actor,action,target) VALUES($1,'block',$2)`,[req.user.id,target]);
+    res.json({ok:true});
+  }catch(e){next(e)}
+});
+
+app.get("/api/matches", requireUser, async(req,res,next)=>{
+  try{
+    const mode=modeOk(req.query.mode)?req.query.mode:"harmony";
+    const {rows}=await pool.query(`
+      SELECT m.*, u.*, cp.pinned,cp.muted,
+      (SELECT body FROM messages mm WHERE mm.match_id=m.id AND mm.kind<>'system' ORDER BY mm.created_at DESC LIMIT 1) AS last_message
+      FROM matches m
+      JOIN users u ON u.id=CASE WHEN m.user1=$1 THEN m.user2 ELSE m.user1 END
+      LEFT JOIN chat_preferences cp ON cp.user_id=$1 AND cp.match_id=m.id
+      WHERE (m.user1=$1 OR m.user2=$1) AND m.mode=$2
+      ORDER BY COALESCE(cp.pinned,FALSE) DESC,m.created_at DESC
+    `,[req.user.id,mode]);
+    res.json({matches:rows.map(r=>({matchId:r.id,mode:r.mode,person:publicProfile(r,mode),pinned:!!r.pinned,muted:!!r.muted,lastMessage:r.last_message||""}))});
+  }catch(e){next(e)}
+});
+async function getMatchFor(userId,matchId){
+  return (await pool.query(`SELECT * FROM matches WHERE id=$1 AND (user1=$2 OR user2=$2)`,[matchId,userId])).rows[0];
+}
+app.get("/api/matches/:id/messages", requireUser, async(req,res,next)=>{
+  try{
+    const m=await getMatchFor(req.user.id,req.params.id);if(!m)return res.status(404).json({error:"match_not_found"});
+    const {rows}=await pool.query(`SELECT * FROM messages WHERE match_id=$1 ORDER BY created_at ASC LIMIT 500`,[m.id]);
+    res.json({messages:rows.map(x=>({id:x.id,kind:x.kind,body:x.body,image:x.image_data,senderId:x.sender_id,createdAt:x.created_at}))});
+  }catch(e){next(e)}
+});
+app.post("/api/matches/:id/messages", requireUser, async(req,res,next)=>{
+  try{
+    const m=await getMatchFor(req.user.id,req.params.id);if(!m)return res.status(404).json({error:"match_not_found"});
+    const text=String(req.body.text||"").trim(),image=String(req.body.image||"");
+    if(!text&&!image)return res.status(400).json({error:"empty_message"});
+    if(image&&!image.startsWith("data:image/"))return res.status(400).json({error:"images_only"});
+    const kind=image?"image":"text";
+    const row=(await pool.query(`INSERT INTO messages(match_id,sender_id,kind,body,image_data) VALUES($1,$2,$3,$4,$5) RETURNING *`,[m.id,req.user.id,kind,text||null,image||null])).rows[0];
+    const other=m.user1===req.user.id?m.user2:m.user1;
+    await pool.query(`INSERT INTO notifications(user_id,type,payload) VALUES($1,'message',$2)`,[other,JSON.stringify({matchId:m.id,mode:m.mode,from:req.user.id})]);
+    if(other.startsWith("demo-")){
+      setTimeout(async()=>{try{
+        const exists=(await pool.query(`SELECT COUNT(*)::int c FROM messages WHERE match_id=$1 AND sender_id=$2`,[m.id,other])).rows[0].c;
+        if(!exists){
+          await pool.query(`INSERT INTO messages(match_id,sender_id,kind,body) VALUES($1,$2,'text',$3)`,[m.id,other,"Привет! Рада нашему мэтчу 🙂"]);
+          await pool.query(`INSERT INTO notifications(user_id,type,payload) VALUES($1,'message',$2)`,[req.user.id,JSON.stringify({matchId:m.id,mode:m.mode,from:other})]);
+        }
+      }catch(e){console.error(e)}},2500);
+    }
+    res.json({ok:true,message:row});
+  }catch(e){next(e)}
+});
+app.patch("/api/matches/:id/preferences", requireUser, async(req,res,next)=>{
+  try{
+    const m=await getMatchFor(req.user.id,req.params.id);if(!m)return res.status(404).json({error:"match_not_found"});
+    const pinned=!!req.body.pinned,muted=!!req.body.muted;
+    await pool.query(`INSERT INTO chat_preferences(user_id,match_id,pinned,muted) VALUES($1,$2,$3,$4)
+      ON CONFLICT(user_id,match_id) DO UPDATE SET pinned=EXCLUDED.pinned,muted=EXCLUDED.muted`,[req.user.id,m.id,pinned,muted]);
+    res.json({ok:true,pinned,muted});
+  }catch(e){next(e)}
+});
+
+app.get("/api/dates", requireUser, async(req,res,next)=>{
+  try{
+    const {rows}=await pool.query(`
+      SELECT d.*, m.user1,m.user2,u.profile AS other_profile
+      FROM dates d JOIN matches m ON m.id=d.match_id
+      JOIN users u ON u.id=CASE WHEN m.user1=$1 THEN m.user2 ELSE m.user1 END
+      WHERE m.user1=$1 OR m.user2=$1 ORDER BY d.when_at ASC
+    `,[req.user.id]);
+    res.json({dates:rows.map(r=>({id:r.id,matchId:r.match_id,mode:r.mode,proposerId:r.proposer_id,when:r.when_at,place:r.place,status:r.status,
+      direction:r.proposer_id===req.user.id?"outgoing":"incoming",person:(r.other_profile?.common?.name)||"",photo:(r.other_profile?.common?.photo)||""}))});
+  }catch(e){next(e)}
+});
+app.post("/api/dates", requireUser, async(req,res,next)=>{
+  try{
+    const m=await getMatchFor(req.user.id,String(req.body.matchId||""));if(!m)return res.status(404).json({error:"match_not_found"});
+    const when=new Date(req.body.when);if(!Number.isFinite(+when)||when<=new Date())return res.status(400).json({error:"bad_time"});
+    const place=String(req.body.place||"").trim();if(!place)return res.status(400).json({error:"place_required"});
+    const did=id(),row=(await pool.query(`INSERT INTO dates(id,match_id,mode,proposer_id,when_at,place,status) VALUES($1,$2,$3,$4,$5,$6,'pending') RETURNING *`,
+      [did,m.id,m.mode,req.user.id,when.toISOString(),place])).rows[0];
+    const other=m.user1===req.user.id?m.user2:m.user1;
+    await pool.query(`INSERT INTO notifications(user_id,type,payload) VALUES($1,'meeting_request',$2)`,[other,JSON.stringify({dateId:did,matchId:m.id,mode:m.mode,from:req.user.id})]);
+    if(other.startsWith("demo-"))setTimeout(()=>demoDateReply(did,other),2600);
+    res.json({ok:true,date:row});
+  }catch(e){next(e)}
+});
+async function demoDateReply(dateId,other){
+  try{
+    const d=(await pool.query(`SELECT * FROM dates WHERE id=$1`,[dateId])).rows[0];if(!d||d.status!=="pending")return;
+    const status=other==="demo-mira"?"declined":"confirmed";
+    await pool.query(`UPDATE dates SET status=$2,updated_at=NOW() WHERE id=$1`,[dateId,status]);
+    const m=(await pool.query(`SELECT * FROM matches WHERE id=$1`,[d.match_id])).rows[0];
+    const recipient=m.user1===other?m.user2:m.user1;
+    await pool.query(`INSERT INTO notifications(user_id,type,payload) VALUES($1,'meeting_reply',$2)`,[recipient,JSON.stringify({dateId,status,mode:d.mode,from:other})]);
+  }catch(e){console.error(e)}
+}
+app.patch("/api/dates/:id/respond", requireUser, async(req,res,next)=>{
+  try{
+    const status=req.body.status;if(!["confirmed","declined"].includes(status))return res.status(400).json({error:"bad_status"});
+    const {rows}=await pool.query(`SELECT d.*,m.user1,m.user2 FROM dates d JOIN matches m ON m.id=d.match_id WHERE d.id=$1 AND (m.user1=$2 OR m.user2=$2)`,[req.params.id,req.user.id]);
+    const d=rows[0];if(!d)return res.status(404).json({error:"date_not_found"});
+    if(d.proposer_id===req.user.id)return res.status(400).json({error:"proposer_cannot_respond"});
+    await pool.query(`UPDATE dates SET status=$2,updated_at=NOW() WHERE id=$1`,[d.id,status]);
+    await pool.query(`INSERT INTO notifications(user_id,type,payload) VALUES($1,'meeting_reply',$2)`,[d.proposer_id,JSON.stringify({dateId:d.id,status,mode:d.mode,from:req.user.id})]);
+    res.json({ok:true});
+  }catch(e){next(e)}
+});
+
+app.patch("/api/dates/:id/complete", requireUser, async(req,res,next)=>{
+  try{
+    const {rows}=await pool.query(`SELECT d.*,m.user1,m.user2 FROM dates d JOIN matches m ON m.id=d.match_id WHERE d.id=$1 AND (m.user1=$2 OR m.user2=$2)`,[req.params.id,req.user.id]);
+    const d=rows[0]; if(!d)return res.status(404).json({error:"date_not_found"});
+    if(d.status!=="confirmed")return res.status(400).json({error:"not_confirmed"});
+    await pool.query(`UPDATE dates SET status='completed',updated_at=NOW() WHERE id=$1`,[d.id]);
+    res.json({ok:true});
+  }catch(e){next(e)}
+});
+
+app.patch("/api/dates/:id", requireUser, async(req,res,next)=>{
+  try{
+    const {rows}=await pool.query(`SELECT d.*,m.user1,m.user2 FROM dates d JOIN matches m ON m.id=d.match_id WHERE d.id=$1 AND (m.user1=$2 OR m.user2=$2)`,[req.params.id,req.user.id]);
+    const d=rows[0];if(!d)return res.status(404).json({error:"date_not_found"});
+    const when=new Date(req.body.when);const place=String(req.body.place||"").trim();
+    if(!Number.isFinite(+when)||when<=new Date()||!place)return res.status(400).json({error:"bad_edit"});
+    await pool.query(`UPDATE dates SET proposer_id=$2,when_at=$3,place=$4,status='pending',reminder_sent='{}'::jsonb,updated_at=NOW() WHERE id=$1`,
+      [d.id,req.user.id,when.toISOString(),place]);
+    const other=d.user1===req.user.id?d.user2:d.user1;
+    await pool.query(`INSERT INTO notifications(user_id,type,payload) VALUES($1,'meeting_edit',$2)`,[other,JSON.stringify({dateId:d.id,mode:d.mode,from:req.user.id})]);
+    res.json({ok:true});
+  }catch(e){next(e)}
+});
+
+app.get("/api/tests", requireUser, async(req,res,next)=>{
+  try{
+    const {rows}=await pool.query(`SELECT DISTINCT ON(type) type,result,answers,created_at FROM tests WHERE user_id=$1 ORDER BY type,created_at DESC`,[req.user.id]);
+    res.json({tests:Object.fromEntries(rows.map(x=>[x.type,{result:x.result,lastAt:x.created_at}]))});
+  }catch(e){next(e)}
+});
+app.post("/api/tests/:type", requireUser, async(req,res,next)=>{
+  try{
+    const type=req.params.type;if(!["mbti","attachment","enneagram","care"].includes(type))return res.status(400).json({error:"bad_type"});
+    const prev=(await pool.query(`SELECT created_at FROM tests WHERE user_id=$1 AND type=$2 ORDER BY created_at DESC LIMIT 1`,[req.user.id,type])).rows[0];
+    if(prev && Date.now()-new Date(prev.created_at)<3*86400000)return res.status(429).json({error:"locked",nextAt:new Date(+new Date(prev.created_at)+3*86400000)});
+    const result=String(req.body.result||"").trim();if(!result)return res.status(400).json({error:"result_required"});
+    await pool.query(`INSERT INTO tests(user_id,type,result,answers) VALUES($1,$2,$3,$4)`,[req.user.id,type,result,JSON.stringify(req.body.answers||[])]);
+    res.json({ok:true});
+  }catch(e){next(e)}
+});
+
+app.get("/api/notifications", requireUser, async(req,res,next)=>{
+  try{
+    const {rows}=await pool.query(`SELECT * FROM notifications WHERE user_id=$1 ORDER BY created_at DESC LIMIT 80`,[req.user.id]);
+    res.json({notifications:rows});
+  }catch(e){next(e)}
+});
+app.post("/api/notifications/read", requireUser, async(req,res,next)=>{
+  try{await pool.query(`UPDATE notifications SET read_at=NOW() WHERE user_id=$1 AND read_at IS NULL`,[req.user.id]);res.json({ok:true})}catch(e){next(e)}
+});
+app.post("/api/reports", requireUser, async(req,res,next)=>{
+  try{
+    const target=String(req.body.targetUserId||""),reason=String(req.body.reason||"").trim(),details=String(req.body.details||"").trim();
+    if(!target||!reason||!details)return res.status(400).json({error:"fields_required"});
+    const rid=id();await pool.query(`INSERT INTO reports(id,reporter_id,reported_user_id,reason,details) VALUES($1,$2,$3,$4,$5)`,[rid,req.user.id,target,reason,details]);
+    await pool.query(`INSERT INTO audit_log(actor,action,target,payload) VALUES($1,'report',$2,$3)`,[req.user.id,target,JSON.stringify({reportId:rid,reason})]);
+    res.json({ok:true});
+  }catch(e){next(e)}
+});
+
+app.post("/api/admin/login", async(req,res,next)=>{
+  try{
+    if(!ADMIN_EMAIL||!ADMIN_PASSWORD)return res.status(503).json({error:"admin_not_configured"});
+    const email=safeEmail(req.body.email),password=String(req.body.password||"");
+    const a=Buffer.from(email),b=Buffer.from(ADMIN_EMAIL),p=Buffer.from(password),q=Buffer.from(ADMIN_PASSWORD);
+    const ok=a.length===b.length&&crypto.timingSafeEqual(a,b)&&p.length===q.length&&crypto.timingSafeEqual(p,q);
+    if(!ok)return res.status(401).json({error:"invalid_admin_login"});
+    const token=await createSession(null,true);setSessionCookie(res,token);res.json({ok:true});
+  }catch(e){next(e)}
+});
+app.get("/api/admin/me", requireAdmin, (req,res)=>res.json({ok:true,email:ADMIN_EMAIL}));
+app.get("/api/admin/reports", requireAdmin, async(req,res,next)=>{
+  try{
+    const {rows}=await pool.query(`SELECT r.*,ru.email reporter_email,tu.email reported_email,tu.profile reported_profile FROM reports r LEFT JOIN users ru ON ru.id=r.reporter_id LEFT JOIN users tu ON tu.id=r.reported_user_id ORDER BY r.created_at DESC`);
+    res.json({reports:rows});
+  }catch(e){next(e)}
+});
+app.patch("/api/admin/reports/:id", requireAdmin, async(req,res,next)=>{
+  try{const st=["new","reviewing","actioned","closed"].includes(req.body.status)?req.body.status:"reviewing";await pool.query(`UPDATE reports SET status=$2,updated_at=NOW() WHERE id=$1`,[req.params.id,st]);res.json({ok:true})}catch(e){next(e)}
+});
+app.get("/api/admin/users", requireAdmin, async(req,res,next)=>{
+  try{
+    const q=String(req.query.q||"").trim().toLowerCase();
+    const {rows}=await pool.query(`SELECT id,email,profile,last_ip,is_demo,created_at,last_seen FROM users WHERE $1='' OR LOWER(email) LIKE '%'||$1||'%' OR LOWER(COALESCE(profile->'common'->>'name','')) LIKE '%'||$1||'%' ORDER BY created_at DESC LIMIT 200`,[q]);
+    res.json({users:rows});
+  }catch(e){next(e)}
+});
+app.get("/api/admin/bans", requireAdmin, async(req,res,next)=>{
+  try{
+    const {rows}=await pool.query(`SELECT b.*,u.email,u.profile FROM bans b LEFT JOIN users u ON u.id=b.user_id ORDER BY b.created_at DESC`);
+    res.json({bans:rows});
+  }catch(e){next(e)}
+});
+app.post("/api/admin/bans", requireAdmin, async(req,res,next)=>{
+  try{
+    const userId=String(req.body.userId||""),minutes=Math.max(1,Number(req.body.durationMinutes||60)),reason=String(req.body.reason||"").trim();
+    if(!userId||!reason)return res.status(400).json({error:"fields_required"});
+    const u=(await pool.query(`SELECT * FROM users WHERE id=$1`,[userId])).rows[0];if(!u)return res.status(404).json({error:"user_not_found"});
+    const bid=id(),until=new Date(Date.now()+minutes*60000);
+    await pool.query(`INSERT INTO bans(id,user_id,ip_address,reason,banned_until) VALUES($1,$2,$3,$4,$5)`,[bid,userId,u.last_ip||null,reason,until.toISOString()]);
+    await pool.query(`INSERT INTO audit_log(actor,action,target,payload) VALUES('admin','ban',$1,$2)`,[userId,JSON.stringify({banId:bid,until,reason,ip:u.last_ip})]);
+    res.json({ok:true,banId:bid,bannedUntil:until});
+  }catch(e){next(e)}
+});
+app.post("/api/admin/bans/:id/revoke", requireAdmin, async(req,res,next)=>{
+  try{await pool.query(`UPDATE bans SET active=FALSE,revoked_at=NOW() WHERE id=$1`,[req.params.id]);res.json({ok:true})}catch(e){next(e)}
+});
+app.get("/api/admin/appeals", requireAdmin, async(req,res,next)=>{
+  try{const {rows}=await pool.query(`SELECT a.*,b.reason,b.banned_until,u.profile,u.email user_email FROM appeals a JOIN bans b ON b.id=a.ban_id LEFT JOIN users u ON u.id=a.user_id ORDER BY a.created_at DESC`);res.json({appeals:rows})}catch(e){next(e)}
+});
+app.patch("/api/admin/appeals/:id", requireAdmin, async(req,res,next)=>{
+  try{const st=["new","reviewing","accepted","rejected"].includes(req.body.status)?req.body.status:"reviewing";await pool.query(`UPDATE appeals SET status=$2,updated_at=NOW() WHERE id=$1`,[req.params.id,st]);if(st==="accepted"){const a=(await pool.query(`SELECT ban_id FROM appeals WHERE id=$1`,[req.params.id])).rows[0];if(a)await pool.query(`UPDATE bans SET active=FALSE,revoked_at=NOW() WHERE id=$1`,[a.ban_id])}res.json({ok:true})}catch(e){next(e)}
+});
+app.get("/api/admin/audit", requireAdmin, async(req,res,next)=>{
+  try{const {rows}=await pool.query(`SELECT * FROM audit_log ORDER BY created_at DESC LIMIT 250`);res.json({audit:rows})}catch(e){next(e)}
+});
+
+async function reminderSweep(){
+  try{
+    const {rows}=await pool.query(`
+      SELECT d.*,m.user1,m.user2,u1.email e1,u1.profile p1,u1.settings s1,u2.email e2,u2.profile p2,u2.settings s2
+      FROM dates d JOIN matches m ON m.id=d.match_id JOIN users u1 ON u1.id=m.user1 JOIN users u2 ON u2.id=m.user2
+      WHERE d.status='confirmed' AND d.when_at>NOW() AND d.when_at<NOW()+INTERVAL '7 days'
+    `);
+    for(const d of rows){
+      for(const side of [1,2]){
+        const uid=d["user"+side],settings=d["s"+side]||{},email=d["e"+side],profile=d["p"+side]||{},other=side===1?d.p2:d.p1;
+        const v=Number(settings.reminderValue||60),unit=settings.reminderUnit||"minutes";
+        const ms=unit==="days"?v*DAY:unit==="hours"?v*3600000:v*60000;
+        const sent=d.reminder_sent||{};
+        if(!sent[uid] && new Date(d.when_at)-Date.now()<=ms){
+          await pool.query(`INSERT INTO notifications(user_id,type,payload) VALUES($1,'meeting_reminder',$2)`,[uid,JSON.stringify({dateId:d.id,mode:d.mode})]);
+          const next={...sent,[uid]:nowIso()};
+          await pool.query(`UPDATE dates SET reminder_sent=$2 WHERE id=$1`,[d.id,JSON.stringify(next)]);
+          await sendReminderEmail(email,other?.common?.name||"человеком",d.when_at,d.place).catch(console.error);
+        }
+      }
+    }
+  }catch(e){console.error("reminder sweep",e)}
 }
 
-async function importAllJobs() {
-  const [jobicy, arbeitnow] = await Promise.all([importJobicy(), importArbeitnow()]);
-  await q("UPDATE jobs SET sector=REPLACE(REPLACE(sector,'&amp;','&'),'&#38;','&') WHERE sector LIKE '%&amp;%' OR sector LIKE '%&#38;%' ").catch(() => {});
-  await normalizeExistingJobExperience().catch(err => console.warn('[jobs] experience normalization skipped:', err.message));
-  await backfillRussianSummaries().catch(err => console.warn('[jobs] summary translation pass skipped:', err.message));
-  return jobicy + arbeitnow;
-}
+app.use(express.static(path.join(__dirname,"public"),{extensions:["html"]}));
+app.get("/admin",(req,res)=>res.sendFile(path.join(__dirname,"public","admin.html")));
+app.get("*",(req,res)=>res.sendFile(path.join(__dirname,"public","index.html")));
 
-app.get('/media/:id', async (req, res, next) => {
-  try {
-    const { rows } = await q('SELECT mime,data FROM media WHERE id=$1', [req.params.id]);
-    if (!rows[0]) return res.status(404).end();
-    res.set('Content-Type', rows[0].mime);
-    res.set('Cache-Control', 'public, max-age=86400');
-    res.send(rows[0].data);
-  } catch (err) { next(err); }
-});
-
-app.get('/healthz', async (_req, res) => {
-  try {
-    await q('SELECT 1');
-    res.status(200).type('text/plain').send('ok');
-  } catch (_) {
-    res.status(503).type('text/plain').send('database unavailable');
-  }
-});
-
-app.get('/', async (req, res, next) => {
-  try {
-    let jobs = (await q(`SELECT * FROM jobs WHERE is_active=TRUE ORDER BY featured DESC, COALESCE(published_at,created_at) DESC LIMIT 6`)).rows;
-    jobs = await attachApplicationStatuses(req.user, jobs);
-    res.render('landing', { title: 'Работа, люди и профессиональные связи', jobs });
-  } catch (err) { next(err); }
-});
-
-// AUTH
-app.get('/register', (req, res) => res.render('auth/register', { title: 'Регистрация' }));
-app.post('/register', authLimiter, async (req, res, next) => {
-  try {
-    const email = cleanText(req.body.email, 240).toLowerCase();
-    const password = String(req.body.password || '');
-    if (!/^\S+@\S+\.\S+$/.test(email)) { flash(req, 'error', 'Проверьте адрес почты.'); return res.redirect('/register'); }
-    if (password.length < 8) { flash(req, 'error', 'Пароль должен содержать минимум 8 символов.'); return res.redirect('/register'); }
-    const exists = await q('SELECT id,email_verified FROM users WHERE email=$1', [email]);
-    if (exists.rows[0]) {
-      if (exists.rows[0].email_verified) { flash(req, 'error', 'Аккаунт с этой почтой уже существует.'); return res.redirect('/login'); }
-      const user = (await q('SELECT * FROM users WHERE id=$1', [exists.rows[0].id])).rows[0];
-      const sent = await createVerificationForUser(user);
-      req.session.verifyEmail = email;
-      if (sent.dev) flash(req, 'info', `DEV: код ${sent.code}. В продакшене он уйдёт на почту.`);
-      return res.redirect('/verify');
-    }
-    const hash = await bcrypt.hash(password, 12);
-    const admin = process.env.ADMIN_EMAIL && email === process.env.ADMIN_EMAIL.toLowerCase();
-    const { rows } = await q('INSERT INTO users(email,password_hash,role) VALUES($1,$2,$3) RETURNING *', [email, hash, admin ? 'admin' : 'user']);
-    const sent = await createVerificationForUser(rows[0]);
-    req.session.verifyEmail = email;
-    if (sent.dev) flash(req, 'info', `DEV: код ${sent.code}. В продакшене он уйдёт на почту.`);
-    res.redirect('/verify');
-  } catch (err) { next(err); }
-});
-
-app.get('/verify', async (req, res, next) => {
-  try {
-    if (req.query.token) {
-      const { rows } = await q('SELECT * FROM users WHERE verification_token=$1 AND verification_expires>NOW()', [req.query.token]);
-      if (!rows[0]) { flash(req, 'error', 'Ссылка устарела или недействительна.'); return res.redirect('/verify'); }
-      await q('UPDATE users SET email_verified=TRUE,verification_code=NULL,verification_token=NULL,verification_expires=NULL WHERE id=$1', [rows[0].id]);
-      req.session.userId = rows[0].id;
-      delete req.session.verifyEmail;
-      flash(req, 'success', 'Почта подтверждена. Теперь соберём профиль.');
-      return res.redirect('/settings/profile');
-    }
-    res.render('auth/verify', { title: 'Подтверждение почты', email: req.session.verifyEmail || '' });
-  } catch (err) { next(err); }
-});
-
-app.post('/verify', authLimiter, async (req, res, next) => {
-  try {
-    const email = cleanText(req.body.email || req.session.verifyEmail, 240).toLowerCase();
-    const code = cleanText(req.body.code, 10);
-    const { rows } = await q('SELECT * FROM users WHERE email=$1 AND verification_code=$2 AND verification_expires>NOW()', [email, code]);
-    if (!rows[0]) { flash(req, 'error', 'Неверный или просроченный код.'); return res.redirect('/verify'); }
-    await q('UPDATE users SET email_verified=TRUE,verification_code=NULL,verification_token=NULL,verification_expires=NULL WHERE id=$1', [rows[0].id]);
-    req.session.userId = rows[0].id;
-    delete req.session.verifyEmail;
-    flash(req, 'success', 'Готово. Аккаунт подтверждён.');
-    res.redirect('/settings/profile');
-  } catch (err) { next(err); }
-});
-
-app.post('/verify/resend', authLimiter, async (req, res, next) => {
-  try {
-    const email = cleanText(req.body.email || req.session.verifyEmail, 240).toLowerCase();
-    const { rows } = await q('SELECT * FROM users WHERE email=$1 AND email_verified=FALSE', [email]);
-    if (rows[0]) {
-      const sent = await createVerificationForUser(rows[0]);
-      if (sent.dev) flash(req, 'info', `DEV: новый код ${sent.code}`); else flash(req, 'success', 'Новый код отправлен.');
-    }
-    res.redirect('/verify');
-  } catch (err) { next(err); }
-});
-
-app.get('/login', (req, res) => res.render('auth/login', { title: 'Вход' }));
-app.post('/login', authLimiter, async (req, res, next) => {
-  try {
-    const email = cleanText(req.body.email, 240).toLowerCase();
-    const { rows } = await q('SELECT * FROM users WHERE email=$1', [email]);
-    const user = rows[0];
-    if (!user || !(await bcrypt.compare(String(req.body.password || ''), user.password_hash))) {
-      flash(req, 'error', 'Неверная почта или пароль.'); return res.redirect('/login');
-    }
-    if (user.is_banned) { flash(req, 'error', 'Аккаунт заблокирован.'); return res.redirect('/login'); }
-    if (!user.email_verified) {
-      req.session.verifyEmail = user.email;
-      flash(req, 'info', 'Сначала подтвердите почту.'); return res.redirect('/verify');
-    }
-    req.session.userId = user.id;
-    const target = req.session.returnTo || (user.username ? '/jobs' : '/settings/profile');
-    delete req.session.returnTo;
-    res.redirect(target);
-  } catch (err) { next(err); }
-});
-
-app.post('/logout', (req, res) => req.session.destroy(() => res.redirect('/')));
-
-// PROFILE
-app.get('/settings/profile', requireAuth, async (req, res) => {
-  res.render('profile/edit', { title: 'Редактировать профиль', profile: req.user });
-});
-
-app.post('/settings/profile', requireAuth, writeLimiter, upload.single('avatar'), async (req, res, next) => {
-  try {
-    let username = cleanText(req.body.username, 40).toLowerCase().replace(/^@/, '');
-    if (!/^[a-z0-9_.-]{3,40}$/.test(username)) {
-      flash(req, 'error', 'Ник: 3–40 символов, латиница, цифры, точка, _ или -.'); return res.redirect('/settings/profile');
-    }
-    const avatar = await saveMedia(req.user.id, req.file);
-    const fields = [
-      cleanText(req.body.name, 120), username, cleanText(req.body.bio, 1200), cleanText(req.body.tg, 120),
-      safeHttpUrl(req.body.vk), cleanText(req.body.contact_email, 240).toLowerCase(), cleanText(req.body.phone, 80), req.body.birth_date || null,
-      cleanText(req.body.location, 160), cleanText(req.body.profession, 160),
-      ['public','friends','private'].includes(req.body.wall_privacy) ? req.body.wall_privacy : 'public',
-      req.body.open_to_work === 'on', req.user.id,
-    ];
-    const avatarSql = avatar ? ',avatar_media_id=$14' : '';
-    if (avatar) fields.push(avatar);
-    await q(`UPDATE users SET name=$1,username=$2,bio=$3,tg=$4,vk=$5,contact_email=$6,phone=$7,birth_date=$8,location=$9,profession=$10,wall_privacy=$11,open_to_work=$12${avatarSql} WHERE id=$13`, fields);
-    flash(req, 'success', 'Профиль сохранён.');
-    res.redirect(`/u/${encodeURIComponent(username)}`);
-  } catch (err) {
-    if (err.code === '23505') { flash(req, 'error', 'Этот ник уже занят. Попробуйте другой.'); return res.redirect('/settings/profile'); }
-    next(err);
-  }
-});
-
-app.get('/u/:username', async (req, res, next) => {
-  try {
-    const { rows } = await q('SELECT * FROM users WHERE LOWER(username)=LOWER($1) AND is_banned=FALSE', [req.params.username]);
-    const profile = rows[0];
-    if (!profile) return res.status(404).render('error', { title: 'Профиль не найден', message: 'Проверьте никнейм.' });
-    const owner = req.user && Number(req.user.id) === Number(profile.id);
-    const friends = req.user ? await areFriends(req.user.id, profile.id) : false;
-    const friendship = req.user && !owner ? await friendshipBetween(req.user.id, profile.id) : null;
-    const cvs = (await q(`
-      SELECT c.*,(SELECT COUNT(*)::int FROM cv_views v WHERE v.cv_id=c.id) AS views
-      FROM cvs c WHERE c.user_id=$1 AND ${owner ? "c.status IN ('draft','published','frozen')" : "c.status='published'"}
-      ORDER BY c.updated_at DESC
-    `, [profile.id])).rows;
-    res.render('profile/view', { title: profile.name || `@${profile.username}`, profile, owner, friends, friendship, cvs });
-  } catch (err) { next(err); }
-});
-
-app.post('/u/:username/friend', requireAuth, writeLimiter, async (req, res, next) => {
-  try {
-    const target = (await q('SELECT id FROM users WHERE LOWER(username)=LOWER($1)', [req.params.username])).rows[0];
-    if (!target || Number(target.id) === Number(req.user.id)) return res.redirect(`/u/${req.params.username}`);
-    if (await blockedEitherWay(req.user.id, target.id)) { flash(req, 'error', 'Нельзя отправить запрос этому пользователю.'); return res.redirect(`/u/${req.params.username}`); }
-    const existing = await friendshipBetween(req.user.id, target.id);
-    if (!existing) await q('INSERT INTO friendships(requester_id,addressee_id) VALUES($1,$2)', [req.user.id, target.id]);
-    flash(req, 'success', 'Запрос в контакты отправлен.');
-    res.redirect(`/u/${req.params.username}`);
-  } catch (err) { next(err); }
-});
-
-app.post('/friends/:id/accept', requireAuth, writeLimiter, async (req, res, next) => {
-  try {
-    await q("UPDATE friendships SET status='accepted' WHERE id=$1 AND addressee_id=$2", [req.params.id, req.user.id]);
-    flash(req, 'success', 'Контакт добавлен.');
-    res.redirect('/people');
-  } catch (err) { next(err); }
-});
-
-app.post('/friends/:id/remove', requireAuth, writeLimiter, async (req, res, next) => {
-  try {
-    await q('DELETE FROM friendships WHERE id=$1 AND (requester_id=$2 OR addressee_id=$2)', [req.params.id, req.user.id]);
-    flash(req, 'success', 'Контакт удалён.');
-    res.redirect(req.get('referer') || '/people');
-  } catch (err) { next(err); }
-});
-
-// CV
-app.get('/my/cv', requireAuth, async (req, res, next) => {
-  try {
-    const cvs = (await q(`SELECT c.*,(SELECT COUNT(*)::int FROM cv_views v WHERE v.cv_id=c.id) AS views FROM cvs c WHERE c.user_id=$1 ORDER BY c.updated_at DESC`, [req.user.id])).rows;
-    res.render('cv/list', { title: 'Мои CV', cvs });
-  } catch (err) { next(err); }
-});
-
-app.post('/my/cv/new', requireAuth, writeLimiter, async (req, res, next) => {
-  try {
-    const { rows } = await q('INSERT INTO cvs(user_id,title) VALUES($1,$2) RETURNING id', [req.user.id, cleanText(req.body.title || 'Новое CV', 120)]);
-    res.redirect(`/my/cv/${rows[0].id}/edit`);
-  } catch (err) { next(err); }
-});
-
-app.get('/my/cv/:id/edit', requireAuth, async (req, res, next) => {
-  try {
-    const cv = (await q('SELECT * FROM cvs WHERE id=$1 AND user_id=$2', [req.params.id, req.user.id])).rows[0];
-    if (!cv) return res.status(404).render('error', { title: 'CV не найден', message: 'У вас нет такого CV.' });
-    const views = (await q('SELECT COUNT(*)::int AS c FROM cv_views WHERE cv_id=$1', [cv.id])).rows[0].c;
-    res.render('cv/edit', { title: 'Редактировать CV', cv, views });
-  } catch (err) { next(err); }
-});
-
-app.post('/my/cv/:id/edit', requireAuth, writeLimiter, async (req, res, next) => {
-  try {
-    await q(`UPDATE cvs SET title=$1,summary=$2,experience=$3,skills=$4,programs=$5,courses=$6,education=$7,portfolio_links=$8,updated_at=NOW() WHERE id=$9 AND user_id=$10`, [
-      cleanText(req.body.title, 160), cleanText(req.body.summary, 4000), cleanText(req.body.experience, 12000),
-      cleanText(req.body.skills, 5000), cleanText(req.body.programs, 5000), cleanText(req.body.courses, 7000),
-      cleanText(req.body.education, 7000), cleanText(req.body.portfolio_links, 5000), req.params.id, req.user.id,
-    ]);
-    flash(req, 'success', 'CV сохранено.');
-    res.redirect(`/my/cv/${req.params.id}/edit`);
-  } catch (err) { next(err); }
-});
-
-app.post('/my/cv/:id/status', requireAuth, writeLimiter, async (req, res, next) => {
-  try {
-    const status = ['draft','published','frozen'].includes(req.body.status) ? req.body.status : 'draft';
-    const cv = (await q('SELECT * FROM cvs WHERE id=$1 AND user_id=$2', [req.params.id, req.user.id])).rows[0];
-    if (!cv) return res.status(404).end();
-    const hasContent = [cv.summary,cv.experience,cv.skills,cv.programs,cv.courses,cv.education,cv.portfolio_links].some(v => cleanText(v).length > 0);
-    if (status === 'published' && !hasContent) {
-      flash(req, 'error', 'Добавьте хотя бы один содержательный блок перед публикацией.');
-      return res.redirect(`/my/cv/${cv.id}/edit`);
-    }
-    await q(`UPDATE cvs SET status=$1,published_at=CASE WHEN $1='published' THEN COALESCE(published_at,NOW()) ELSE published_at END,updated_at=NOW() WHERE id=$2`, [status, cv.id]);
-    flash(req, 'success', status === 'published' ? 'CV опубликовано.' : status === 'frozen' ? 'CV заморожено и скрыто от других.' : 'CV возвращено в черновики.');
-    res.redirect('/my/cv');
-  } catch (err) { next(err); }
-});
-
-app.get('/cv/:id', async (req, res, next) => {
-  try {
-    const cv = (await q(`SELECT c.*,u.username,u.name,u.profession,u.location,u.avatar_media_id,u.open_to_work FROM cvs c JOIN users u ON u.id=c.user_id WHERE c.id=$1 AND u.is_banned=FALSE`, [req.params.id])).rows[0];
-    if (!cv) return res.status(404).render('error', { title: 'CV не найден', message: 'Возможно, оно удалено.' });
-    const owner = req.user && Number(req.user.id) === Number(cv.user_id);
-    if (!owner && cv.status !== 'published') return res.status(404).render('error', { title: 'CV недоступно', message: 'Автор скрыл или заморозил это CV.' });
-    if (!owner) {
-      let viewerKey;
-      if (req.user) viewerKey = `u:${req.user.id}`;
-      else {
-        viewerKey = req.session.cvVisitorKey || `a:${crypto.randomUUID()}`;
-        req.session.cvVisitorKey = viewerKey;
-      }
-      const inserted = await q('INSERT INTO cv_views(cv_id,viewer_key,viewer_user_id) VALUES($1,$2,$3) ON CONFLICT DO NOTHING RETURNING id', [cv.id, viewerKey, req.user ? req.user.id : null]);
-      if (inserted.rowCount) {
-        const count = (await q('SELECT COUNT(*)::int AS c FROM cv_views WHERE cv_id=$1', [cv.id])).rows[0].c;
-        io.to(`cv:${cv.id}`).emit('cv_view_count', { cvId: String(cv.id), count });
-      }
-    }
-    const views = (await q('SELECT COUNT(*)::int AS c FROM cv_views WHERE cv_id=$1', [cv.id])).rows[0].c;
-    res.render('cv/view', { title: cv.title, cv, owner, views });
-  } catch (err) { next(err); }
-});
-
-// JOBS
-app.get('/jobs', async (req, res, next) => {
-  try {
-    const params = [];
-    const where = ['is_active=TRUE', '(expires_at IS NULL OR expires_at>NOW())'];
-    const add = (sql, value) => { params.push(value); where.push(sql.replace('?', `$${params.length}`)); };
-    const query = cleanText(req.query.q, 100);
-    if (query) {
-      const val = `%${query}%`;
-      params.push(val,val,val,val,val,val,val,val);
-      const n = params.length;
-      where.push(`(title ILIKE $${n-7} OR company ILIKE $${n-6} OR COALESCE(summary_ru,summary,'') ILIKE $${n-5} OR COALESCE(sector,'') ILIKE $${n-4} OR COALESCE(location,'') ILIKE $${n-3} OR COALESCE(experience,'') ILIKE $${n-2} OR COALESCE(work_mode,'') ILIKE $${n-1} OR COALESCE(employment_type,'') ILIKE $${n})`);
-    }
-    if (cleanText(req.query.sector, 100)) add('sector ILIKE ?', `%${cleanText(req.query.sector,100)}%`);
-    if (cleanText(req.query.mode, 80)) add('work_mode ILIKE ?', `%${cleanText(req.query.mode,80)}%`);
-    if (cleanText(req.query.experience, 80)) add('experience = ?', cleanText(req.query.experience,80));
-    if (cleanText(req.query.location, 100)) add('location ILIKE ?', `%${cleanText(req.query.location,100)}%`);
-    if (req.query.salary === '1') where.push("COALESCE(salary,'')<>''");
-    let jobs = (await q(`SELECT * FROM jobs WHERE ${where.join(' AND ')} ORDER BY featured DESC, COALESCE(published_at,created_at) DESC LIMIT 250`, params)).rows;
-    jobs = await attachApplicationStatuses(req.user, jobs);
-    const sectors = (await q(`SELECT DISTINCT sector FROM jobs WHERE is_active=TRUE AND COALESCE(sector,'')<>'' ORDER BY sector LIMIT 80`)).rows.map(r => r.sector);
-    const modeRows = (await q(`SELECT work_mode,COUNT(*)::int AS c FROM jobs WHERE is_active=TRUE AND work_mode IN ('Remote','Hybrid','Office') GROUP BY work_mode`)).rows;
-    const modeCounts = Object.fromEntries(modeRows.map(r => [r.work_mode, r.c]));
-    res.render('jobs/list', { title: 'Вакансии', jobs, sectors, modeCounts, filters: req.query });
-  } catch (err) { next(err); }
-});
-
-app.get('/jobs/:id', async (req, res, next) => {
-  try {
-    const job = (await q('SELECT * FROM jobs WHERE id=$1 AND is_active=TRUE', [req.params.id])).rows[0];
-    if (!job) return res.status(404).render('error', { title: 'Вакансия недоступна', message: 'Она могла быть снята или устареть.' });
-    let application = null;
-    if (req.user) application = (await q('SELECT * FROM applications WHERE user_id=$1 AND job_id=$2', [req.user.id, job.id])).rows[0] || null;
-    res.render('jobs/view', { title: job.title, job, application });
-  } catch (err) { next(err); }
-});
-
-app.post('/jobs/:id/save', requireAuth, writeLimiter, async (req, res, next) => {
-  try {
-    const job = (await q('SELECT id FROM jobs WHERE id=$1 AND is_active=TRUE', [req.params.id])).rows[0];
-    if (!job) return res.status(404).end();
-    await q(`INSERT INTO applications(user_id,job_id,status) VALUES($1,$2,'want') ON CONFLICT(user_id,job_id) DO UPDATE SET updated_at=NOW()`, [req.user.id, job.id]);
-    flash(req,'success','Вакансия сохранена в органайзер.');
-    res.redirect(`/jobs/${job.id}`);
-  } catch (err) { next(err); }
-});
-
-app.get('/jobs/:id/apply', async (req, res, next) => {
-  try {
-    const job = (await q('SELECT id,source_url FROM jobs WHERE id=$1 AND is_active=TRUE', [req.params.id])).rows[0];
-    if (!job) return res.status(404).end();
-    if (!req.user) {
-      req.session.returnTo = `/jobs/${job.id}`;
-      flash(req, 'info', 'Войдите, чтобы сохранить отклик в личный органайзер.');
-      return res.redirect('/login');
-    }
-    await q(`INSERT INTO applications(user_id,job_id,status) VALUES($1,$2,'waiting') ON CONFLICT(user_id,job_id) DO UPDATE SET status=CASE WHEN applications.status='want' THEN 'waiting' ELSE applications.status END,updated_at=NOW()`, [req.user.id, job.id]);
-    const target = safeHttpUrl(job.source_url);
-    if (!target) return res.status(400).render('error', { title: 'Некорректная ссылка', message: 'Источник вакансии содержит недопустимый адрес.' });
-    return res.redirect(target);
-  } catch (err) { next(err); }
-});
-
-app.get('/applications', requireAuth, async (req, res, next) => {
-  try {
-    const status = ['want','waiting','interview','offer','rejected','not_fit'].includes(req.query.status) ? req.query.status : '';
-    const params = [req.user.id];
-    let sql = `SELECT a.*,j.title,j.company,j.source,j.source_url,j.location,j.work_mode,j.salary,j.sector FROM applications a JOIN jobs j ON j.id=a.job_id WHERE a.user_id=$1`;
-    if (status) { params.push(status); sql += ` AND a.status=$2`; }
-    sql += ' ORDER BY a.updated_at DESC';
-    const apps = (await q(sql, params)).rows;
-    res.render('applications/list', { title: 'Мои отклики', apps, status });
-  } catch (err) { next(err); }
-});
-
-app.post('/applications/:id', requireAuth, writeLimiter, async (req, res, next) => {
-  try {
-    const status = ['want','waiting','interview','offer','rejected','not_fit'].includes(req.body.status) ? req.body.status : 'waiting';
-    await q('UPDATE applications SET status=$1,notes=$2,updated_at=NOW() WHERE id=$3 AND user_id=$4', [status, cleanText(req.body.notes, 3000), req.params.id, req.user.id]);
-    flash(req, 'success', 'Статус обновлён.');
-    res.redirect('/applications');
-  } catch (err) { next(err); }
-});
-
-// PEOPLE
-app.get('/people', async (req, res, next) => {
-  try {
-    const rawTerm = cleanText(req.query.q, 80);
-    const term = rawTerm.replace(/^@+/, '').trim();
-    let people = [];
-    if (term) {
-      people = (await q(`SELECT u.id,u.username,u.name,u.profession,u.location,u.avatar_media_id,u.bio,u.open_to_work FROM users u WHERE u.username IS NOT NULL AND u.is_banned=FALSE AND u.username ILIKE $1 ORDER BY CASE WHEN LOWER(u.username)=LOWER($2) THEN 0 ELSE 1 END,u.username LIMIT 40`, [`%${term}%`, term])).rows;
-    }
-    let pending = [];
-    let contacts = [];
-    if (req.user) {
-      pending = (await q(`SELECT f.*,u.username,u.name,u.profession,u.avatar_media_id FROM friendships f JOIN users u ON u.id=f.requester_id WHERE f.addressee_id=$1 AND f.status='pending' ORDER BY f.created_at DESC`, [req.user.id])).rows;
-      contacts = (await q(`
-        SELECT f.id AS friendship_id,u.id,u.username,u.name,u.profession,u.location,u.avatar_media_id,u.open_to_work
-        FROM friendships f
-        JOIN users u ON u.id=CASE WHEN f.requester_id=$1 THEN f.addressee_id ELSE f.requester_id END
-        WHERE f.status='accepted' AND (f.requester_id=$1 OR f.addressee_id=$1) AND u.is_banned=FALSE
-        ORDER BY COALESCE(u.name,u.username)
-      `,[req.user.id])).rows;
-    }
-    res.render('people/list', { title: 'Люди', people, pending, contacts, term: rawTerm });
-  } catch (err) { next(err); }
-});
-
-// Temporarily hidden modules. Backend tables are kept for a later iteration.
-app.use(['/feed','/articles','/groups'], (req, res) => res.redirect(303, '/'));
-
-// FEED / POSTS
-app.get('/feed', async (req, res, next) => {
-  try {
-    let posts;
-    if (req.user) {
-      posts = (await q(`
-        SELECT p.*,u.username,u.name,u.profession,u.avatar_media_id,u.wall_privacy,
-          EXISTS(SELECT 1 FROM friendships f WHERE f.status='accepted' AND ((f.requester_id=$1 AND f.addressee_id=u.id) OR (f.addressee_id=$1 AND f.requester_id=u.id))) AS is_friend
-        FROM posts p JOIN users u ON u.id=p.user_id
-        WHERE u.is_banned=FALSE AND (
-          p.user_id=$1 OR
-          (p.visibility='public' AND u.wall_privacy='public') OR
-          (EXISTS(SELECT 1 FROM friendships f WHERE f.status='accepted' AND ((f.requester_id=$1 AND f.addressee_id=u.id) OR (f.addressee_id=$1 AND f.requester_id=u.id)))
-             AND p.visibility IN ('public','friends') AND u.wall_privacy IN ('public','friends'))
-        )
-        ORDER BY p.created_at DESC LIMIT 150
-      `, [req.user.id])).rows;
-    } else {
-      posts = (await q(`SELECT p.*,u.username,u.name,u.profession,u.avatar_media_id FROM posts p JOIN users u ON u.id=p.user_id WHERE p.visibility='public' AND u.wall_privacy='public' AND u.is_banned=FALSE ORDER BY p.created_at DESC LIMIT 100`)).rows;
-    }
-    res.render('feed/list', { title: 'Лента', posts });
-  } catch (err) { next(err); }
-});
-
-app.post('/feed', requireAuth, writeLimiter, upload.single('image'), async (req, res, next) => {
-  try {
-    const body = cleanText(req.body.body, 5000);
-    const mediaId = await saveMedia(req.user.id, req.file);
-    if (!body && !mediaId) { flash(req, 'error', 'Напишите текст или добавьте изображение.'); return res.redirect('/feed'); }
-    const visibility = ['public','friends','private'].includes(req.body.visibility) ? req.body.visibility : 'public';
-    await q('INSERT INTO posts(user_id,body,media_id,visibility) VALUES($1,$2,$3,$4)', [req.user.id, body || null, mediaId, visibility]);
-    res.redirect('/feed');
-  } catch (err) { next(err); }
-});
-
-app.post('/posts/:id/delete', requireAuth, writeLimiter, async (req, res, next) => {
-  try {
-    await q('DELETE FROM posts WHERE id=$1 AND user_id=$2', [req.params.id, req.user.id]);
-    res.redirect(req.get('referer') || '/feed');
-  } catch (err) { next(err); }
-});
-
-// ARTICLES / LONGFORM BLOG
-app.get('/articles', async (req, res, next) => {
-  try {
-    const articles = (await q(`
-      SELECT a.*,u.username,u.name,u.profession,u.avatar_media_id
-      FROM articles a JOIN users u ON u.id=a.user_id
-      WHERE a.status='published' AND u.is_banned=FALSE
-      ORDER BY a.published_at DESC NULLS LAST,a.created_at DESC LIMIT 100
-    `)).rows;
-    res.render('articles/list', { title: 'Статьи', articles });
-  } catch (err) { next(err); }
-});
-
-app.get('/articles/new', requireAuth, (req, res) => {
-  res.render('articles/edit', { title: 'Новая статья', article: null });
-});
-
-app.post('/articles', requireAuth, writeLimiter, upload.single('cover'), async (req, res, next) => {
-  try {
-    const title = cleanText(req.body.title, 220);
-    const body = cleanText(req.body.body, 40000);
-    if (!title || !body) { flash(req, 'error', 'Добавьте заголовок и текст статьи.'); return res.redirect('/articles/new'); }
-    const cover = await saveMedia(req.user.id, req.file);
-    const status = req.body.status === 'published' ? 'published' : 'draft';
-    const { rows } = await q(`INSERT INTO articles(user_id,title,excerpt,body,cover_media_id,status,published_at) VALUES($1,$2,$3,$4,$5,$6,CASE WHEN $6='published' THEN NOW() ELSE NULL END) RETURNING id`, [req.user.id,title,cleanText(req.body.excerpt,700),body,cover,status]);
-    flash(req, 'success', status === 'published' ? 'Статья опубликована.' : 'Черновик сохранён.');
-    res.redirect(status === 'published' ? `/articles/${rows[0].id}` : `/articles/${rows[0].id}/edit`);
-  } catch (err) { next(err); }
-});
-
-app.get('/articles/:id/edit', requireAuth, async (req, res, next) => {
-  try {
-    const article = (await q('SELECT * FROM articles WHERE id=$1 AND user_id=$2', [req.params.id, req.user.id])).rows[0];
-    if (!article) return res.status(404).render('error', { title: 'Статья не найдена', message: 'У вас нет такого черновика.' });
-    res.render('articles/edit', { title: 'Редактировать статью', article });
-  } catch (err) { next(err); }
-});
-
-app.post('/articles/:id/edit', requireAuth, writeLimiter, upload.single('cover'), async (req, res, next) => {
-  try {
-    const article = (await q('SELECT * FROM articles WHERE id=$1 AND user_id=$2', [req.params.id, req.user.id])).rows[0];
-    if (!article) return res.status(404).end();
-    const cover = await saveMedia(req.user.id, req.file);
-    const status = req.body.status === 'published' ? 'published' : 'draft';
-    const params = [cleanText(req.body.title,220),cleanText(req.body.excerpt,700),cleanText(req.body.body,40000),status,req.params.id,req.user.id];
-    let coverSql='';
-    if (cover) { params.push(cover); coverSql=',cover_media_id=$7'; }
-    await q(`UPDATE articles SET title=$1,excerpt=$2,body=$3,status=$4,published_at=CASE WHEN $4='published' THEN COALESCE(published_at,NOW()) ELSE published_at END,updated_at=NOW()${coverSql} WHERE id=$5 AND user_id=$6`, params);
-    flash(req,'success','Статья сохранена.');
-    res.redirect(status==='published' ? `/articles/${req.params.id}` : `/articles/${req.params.id}/edit`);
-  } catch (err) { next(err); }
-});
-
-app.get('/articles/:id', async (req,res,next)=>{
-  try{
-    const article=(await q(`SELECT a.*,u.username,u.name,u.profession,u.avatar_media_id FROM articles a JOIN users u ON u.id=a.user_id WHERE a.id=$1 AND u.is_banned=FALSE`,[req.params.id])).rows[0];
-    if(!article) return res.status(404).render('error',{title:'Статья не найдена',message:'Возможно, она удалена.'});
-    const owner=req.user && Number(req.user.id)===Number(article.user_id);
-    if(article.status!=='published' && !owner) return res.status(404).render('error',{title:'Статья недоступна',message:'Это черновик автора.'});
-    res.render('articles/view',{title:article.title,article,owner});
-  }catch(err){next(err)}
-});
-
-// MESSAGES
-app.get('/messages', requireAuth, async (req, res, next) => {
-  try {
-    const conversations = (await q(`
-      WITH peers AS (
-        SELECT CASE WHEN sender_id=$1 THEN receiver_id ELSE sender_id END AS peer_id, MAX(created_at) AS last_at
-        FROM messages WHERE sender_id=$1 OR receiver_id=$1
-        GROUP BY 1
-      )
-      SELECT p.peer_id,p.last_at,u.username,u.name,u.profession,u.avatar_media_id,
-        (SELECT body FROM messages m WHERE (m.sender_id=$1 AND m.receiver_id=p.peer_id) OR (m.sender_id=p.peer_id AND m.receiver_id=$1) ORDER BY m.created_at DESC LIMIT 1) AS last_body,
-        (SELECT COUNT(*)::int FROM messages m WHERE m.receiver_id=$1 AND m.sender_id=p.peer_id AND m.read_at IS NULL) AS unread,
-        EXISTS(SELECT 1 FROM mutes mu WHERE mu.user_id=$1 AND mu.muted_user_id=p.peer_id) AS muted
-      FROM peers p JOIN users u ON u.id=p.peer_id
-      ORDER BY p.last_at DESC
-    `, [req.user.id])).rows;
-    res.render('messages/list', { title: 'Сообщения', conversations });
-  } catch (err) { next(err); }
-});
-
-app.get('/messages/:username', requireAuth, async (req, res, next) => {
-  try {
-    const peer = (await q('SELECT id,username,name,profession,avatar_media_id FROM users WHERE LOWER(username)=LOWER($1) AND is_banned=FALSE', [req.params.username])).rows[0];
-    if (!peer || Number(peer.id) === Number(req.user.id)) return res.status(404).render('error', { title: 'Диалог не найден', message: 'Нельзя открыть этот диалог.' });
-    const blocked = await blockedEitherWay(req.user.id, peer.id);
-    const muted = (await q('SELECT 1 FROM mutes WHERE user_id=$1 AND muted_user_id=$2', [req.user.id, peer.id])).rowCount > 0;
-    const messages = (await q(`SELECT * FROM messages WHERE (sender_id=$1 AND receiver_id=$2) OR (sender_id=$2 AND receiver_id=$1) ORDER BY created_at ASC LIMIT 500`, [req.user.id, peer.id])).rows;
-    await q('UPDATE messages SET read_at=NOW() WHERE receiver_id=$1 AND sender_id=$2 AND read_at IS NULL', [req.user.id, peer.id]);
-    res.render('messages/thread', { title: `Диалог с @${peer.username}`, peer, messages, blocked, muted });
-  } catch (err) { next(err); }
-});
-
-app.post('/messages/:username/send', requireAuth, writeLimiter, upload.single('image'), async (req, res, next) => {
-  try {
-    const peer = (await q('SELECT id,username FROM users WHERE LOWER(username)=LOWER($1) AND is_banned=FALSE', [req.params.username])).rows[0];
-    if (!peer || Number(peer.id) === Number(req.user.id)) return res.status(404).json({ error: 'Пользователь не найден.' });
-    if (await blockedEitherWay(req.user.id, peer.id)) return res.status(403).json({ error: 'Отправка сообщений заблокирована.' });
-    const body = cleanText(req.body.body, 5000);
-    const mediaId = await saveMedia(req.user.id, req.file);
-    if (!body && !mediaId) return res.status(400).json({ error: 'Пустое сообщение.' });
-    const { rows } = await q('INSERT INTO messages(sender_id,receiver_id,body,media_id) VALUES($1,$2,$3,$4) RETURNING *', [req.user.id, peer.id, body || null, mediaId]);
-    const payload = { ...rows[0], senderUsername: req.user.username, receiverUsername: peer.username };
-    io.to(`user:${req.user.id}`).emit('message:new', payload);
-    io.to(`user:${peer.id}`).emit('message:new', payload);
-    res.json({ ok: true, message: payload });
-  } catch (err) { next(err); }
-});
-
-app.post('/messages/:username/block', requireAuth, writeLimiter, async (req, res, next) => {
-  try {
-    const peer = (await q('SELECT id FROM users WHERE LOWER(username)=LOWER($1)', [req.params.username])).rows[0];
-    if (!peer) return res.redirect('/messages');
-    const exists = await q('SELECT 1 FROM blocks WHERE blocker_id=$1 AND blocked_id=$2', [req.user.id, peer.id]);
-    if (exists.rowCount) await q('DELETE FROM blocks WHERE blocker_id=$1 AND blocked_id=$2', [req.user.id, peer.id]);
-    else await q('INSERT INTO blocks(blocker_id,blocked_id) VALUES($1,$2) ON CONFLICT DO NOTHING', [req.user.id, peer.id]);
-    res.redirect(`/messages/${req.params.username}`);
-  } catch (err) { next(err); }
-});
-
-app.post('/messages/:username/mute', requireAuth, writeLimiter, async (req, res, next) => {
-  try {
-    const peer = (await q('SELECT id FROM users WHERE LOWER(username)=LOWER($1)', [req.params.username])).rows[0];
-    if (!peer) return res.redirect('/messages');
-    const exists = await q('SELECT 1 FROM mutes WHERE user_id=$1 AND muted_user_id=$2', [req.user.id, peer.id]);
-    if (exists.rowCount) await q('DELETE FROM mutes WHERE user_id=$1 AND muted_user_id=$2', [req.user.id, peer.id]);
-    else await q('INSERT INTO mutes(user_id,muted_user_id) VALUES($1,$2) ON CONFLICT DO NOTHING', [req.user.id, peer.id]);
-    res.redirect(`/messages/${req.params.username}`);
-  } catch (err) { next(err); }
-});
-
-// GROUPS
-app.get('/groups', async (req, res, next) => {
-  try {
-    const groups = (await q(`SELECT g.*,u.username,(SELECT COUNT(*)::int FROM group_members gm WHERE gm.group_id=g.id) AS members FROM groups g JOIN users u ON u.id=g.owner_id ORDER BY g.created_at DESC LIMIT 100`)).rows;
-    res.render('groups/list', { title: 'Группы', groups });
-  } catch (err) { next(err); }
-});
-
-app.post('/groups', requireAuth, writeLimiter, async (req, res, next) => {
-  const client = await pool.connect();
-  try {
-    const name = cleanText(req.body.name, 120);
-    if (name.length < 3) { flash(req, 'error', 'Название группы слишком короткое.'); return res.redirect('/groups'); }
-    let slug = slugify(req.body.slug || name);
-    await client.query('BEGIN');
-    const { rows } = await client.query('INSERT INTO groups(owner_id,name,slug,description,privacy) VALUES($1,$2,$3,$4,$5) RETURNING *', [req.user.id, name, slug, cleanText(req.body.description, 1500), req.body.privacy === 'private' ? 'private' : 'public']);
-    await client.query("INSERT INTO group_members(group_id,user_id,role) VALUES($1,$2,'owner')", [rows[0].id, req.user.id]);
-    await client.query('COMMIT');
-    res.redirect(`/groups/${rows[0].slug}`);
-  } catch (err) {
-    await client.query('ROLLBACK');
-    if (err.code === '23505') { flash(req, 'error', 'Такой адрес группы уже занят.'); return res.redirect('/groups'); }
-    next(err);
-  } finally { client.release(); }
-});
-
-app.get('/groups/:slug', async (req, res, next) => {
-  try {
-    const group = (await q(`SELECT g.*,u.username,(SELECT COUNT(*)::int FROM group_members gm WHERE gm.group_id=g.id) AS members FROM groups g JOIN users u ON u.id=g.owner_id WHERE g.slug=$1`, [req.params.slug])).rows[0];
-    if (!group) return res.status(404).render('error', { title: 'Группа не найдена', message: 'Проверьте адрес.' });
-    const member = req.user ? (await q('SELECT * FROM group_members WHERE group_id=$1 AND user_id=$2', [group.id, req.user.id])).rows[0] : null;
-    if (group.privacy === 'private' && !member) return res.status(403).render('error', { title: 'Закрытая группа', message: 'Публикации видят только участники.' });
-    const posts = (await q(`SELECT gp.*,u.username,u.name,u.avatar_media_id FROM group_posts gp JOIN users u ON u.id=gp.user_id WHERE gp.group_id=$1 ORDER BY gp.created_at DESC LIMIT 100`, [group.id])).rows;
-    res.render('groups/view', { title: group.name, group, member, posts });
-  } catch (err) { next(err); }
-});
-
-app.post('/groups/:slug/join', requireAuth, writeLimiter, async (req, res, next) => {
-  try {
-    const group = (await q('SELECT id,privacy FROM groups WHERE slug=$1', [req.params.slug])).rows[0];
-    if (!group) return res.status(404).end();
-    // MVP: private groups currently require owner to share the URL, but join is still immediate.
-    await q('INSERT INTO group_members(group_id,user_id) VALUES($1,$2) ON CONFLICT DO NOTHING', [group.id, req.user.id]);
-    res.redirect(`/groups/${req.params.slug}`);
-  } catch (err) { next(err); }
-});
-
-app.post('/groups/:slug/post', requireAuth, writeLimiter, upload.single('image'), async (req, res, next) => {
-  try {
-    const group = (await q('SELECT id FROM groups WHERE slug=$1', [req.params.slug])).rows[0];
-    if (!group) return res.status(404).end();
-    const member = await q('SELECT 1 FROM group_members WHERE group_id=$1 AND user_id=$2', [group.id, req.user.id]);
-    if (!member.rowCount) return res.status(403).end();
-    const body = cleanText(req.body.body, 5000);
-    if (!body) { flash(req, 'error', 'Напишите текст поста.'); return res.redirect(`/groups/${req.params.slug}`); }
-    const mediaId = await saveMedia(req.user.id, req.file);
-    await q('INSERT INTO group_posts(group_id,user_id,body,media_id) VALUES($1,$2,$3,$4)', [group.id, req.user.id, body, mediaId]);
-    res.redirect(`/groups/${req.params.slug}`);
-  } catch (err) { next(err); }
-});
-
-// EMPLOYERS
-app.get('/employers', (req, res) => res.render('employers', { title: 'Работодателям' }));
-
-// REPORTS
-app.post('/report', requireAuth, writeLimiter, async (req, res, next) => {
-  try {
-    const type = ['user','post','message','group'].includes(req.body.target_type) ? req.body.target_type : null;
-    const id = Number(req.body.target_id);
-    const reason = cleanText(req.body.reason, 1000);
-    if (!type || !id || !reason) { flash(req, 'error', 'Не удалось отправить жалобу.'); return res.redirect(req.get('referer') || '/'); }
-    await q('INSERT INTO reports(reporter_id,target_type,target_id,reason) VALUES($1,$2,$3,$4)', [req.user.id, type, id, reason]);
-    flash(req, 'success', 'Жалоба отправлена администратору.');
-    res.redirect(req.get('referer') || '/');
-  } catch (err) { next(err); }
-});
-
-// ADMIN
-app.get('/admin', requireAdmin, async (req, res, next) => {
-  try {
-    const [users,jobs,messages,reports] = await Promise.all([
-      q('SELECT COUNT(*)::int AS c FROM users'), q('SELECT COUNT(*)::int AS c FROM jobs WHERE is_active=TRUE'),
-      q('SELECT COUNT(*)::int AS c FROM messages'), q("SELECT COUNT(*)::int AS c FROM reports WHERE status='open'")
-    ]);
-    const recentJobs = (await q('SELECT * FROM jobs ORDER BY created_at DESC LIMIT 8')).rows;
-    res.render('admin/dashboard', { title: 'Админ-панель', stats: { users:users.rows[0].c,jobs:jobs.rows[0].c,messages:messages.rows[0].c,reports:reports.rows[0].c }, recentJobs });
-  } catch (err) { next(err); }
-});
-
-app.get('/admin/jobs', requireAdmin, async (req, res, next) => {
-  try {
-    const jobs = (await q('SELECT * FROM jobs ORDER BY featured DESC,created_at DESC LIMIT 300')).rows;
-    res.render('admin/jobs', { title: 'Админ · вакансии', jobs });
-  } catch (err) { next(err); }
-});
-
-app.get('/admin/jobs/:id/edit', requireAdmin, async (req,res,next)=>{
-  try{
-    const job=(await q('SELECT * FROM jobs WHERE id=$1',[req.params.id])).rows[0];
-    if(!job) return res.status(404).render('error',{title:'Вакансия не найдена',message:'Возможно, она удалена.'});
-    res.render('admin/job-edit',{title:'Админ · редактировать вакансию',job});
-  }catch(err){next(err)}
-});
-
-app.post('/admin/jobs/:id/edit', requireAdmin, writeLimiter, async (req,res,next)=>{
-  try{
-    const sourceUrl=safeHttpUrl(req.body.source_url);
-    if(!sourceUrl){flash(req,'error','Укажите корректную http/https ссылку.');return res.redirect(`/admin/jobs/${req.params.id}/edit`)}
-    const description=safeRichHtml(cleanText(req.body.description,30000).replace(/\n/g,'<br>'));
-    await q(`UPDATE jobs SET source=$1,source_url=$2,title=$3,company=$4,summary=$5,summary_ru=NULL,description_html=$6,experience=$7,work_mode=$8,salary=$9,location=$10,sector=$11,employment_type=$12,expires_at=$13,featured=$14,is_active=$15,updated_at=NOW() WHERE id=$16`,[
-      cleanText(req.body.source,80),sourceUrl,cleanText(req.body.title,240),cleanText(req.body.company,180),cleanText(req.body.summary,600),description,
-      cleanText(req.body.experience,80),cleanText(req.body.work_mode,80),cleanText(req.body.salary,120),cleanText(req.body.location,160),cleanText(req.body.sector,120),cleanText(req.body.employment_type,100),req.body.expires_at||null,req.body.featured==='on',req.body.is_active==='on',req.params.id
-    ]);
-    flash(req,'success','Вакансия обновлена.');res.redirect('/admin/jobs');
-  }catch(err){if(err.code==='23505'){flash(req,'error','Такая ссылка уже используется другой вакансией.');return res.redirect(`/admin/jobs/${req.params.id}/edit`)} next(err)}
-});
-
-app.post('/admin/jobs', requireAdmin, writeLimiter, async (req, res, next) => {
-  try {
-    const sourceUrl = safeHttpUrl(req.body.source_url);
-    if (!sourceUrl) { flash(req, 'error', 'Укажите корректную http/https ссылку на вакансию.'); return res.redirect('/admin/jobs'); }
-    const description = safeRichHtml(cleanText(req.body.description, 30000).replace(/\n/g, '<br>'));
-    await q(`INSERT INTO jobs(source,source_url,title,company,summary,description_html,experience,work_mode,salary,location,sector,employment_type,published_at,expires_at,featured,is_active,created_by)
-      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,NOW(),$13,$14,TRUE,$15)`, [
-      cleanText(req.body.source || 'Direct',80), sourceUrl, cleanText(req.body.title,240), cleanText(req.body.company,180),
-      cleanText(req.body.summary,600), description, cleanText(req.body.experience,80), cleanText(req.body.work_mode,80), cleanText(req.body.salary,120),
-      cleanText(req.body.location,160), cleanText(req.body.sector,120), cleanText(req.body.employment_type,100), req.body.expires_at || null,
-      req.body.featured === 'on', req.user.id,
-    ]);
-    flash(req, 'success', 'Вакансия опубликована.');
-    res.redirect('/admin/jobs');
-  } catch (err) {
-    if (err.code === '23505') flash(req, 'error', 'Вакансия с этой ссылкой уже есть.'); else return next(err);
-    res.redirect('/admin/jobs');
-  }
-});
-
-app.post('/admin/jobs/:id', requireAdmin, writeLimiter, async (req, res, next) => {
-  try {
-    const action = req.body.action;
-    if (action === 'feature') await q('UPDATE jobs SET featured=NOT featured,updated_at=NOW() WHERE id=$1', [req.params.id]);
-    if (action === 'active') await q('UPDATE jobs SET is_active=NOT is_active,updated_at=NOW() WHERE id=$1', [req.params.id]);
-    if (action === 'delete') await q('DELETE FROM jobs WHERE id=$1', [req.params.id]);
-    res.redirect('/admin/jobs');
-  } catch (err) { next(err); }
-});
-
-app.post('/admin/jobs/import', requireAdmin, writeLimiter, async (req, res) => {
-  const count = await importAllJobs();
-  flash(req, 'success', `Импорт вакансий завершён: обработано ${count}.`);
-  res.redirect('/admin/jobs');
-});
-
-app.get('/admin/users', requireAdmin, async (req, res, next) => {
-  try {
-    const users = (await q(`SELECT u.*,(SELECT COUNT(*)::int FROM cvs c WHERE c.user_id=u.id) AS cvs,(SELECT COUNT(*)::int FROM posts p WHERE p.user_id=u.id) AS posts FROM users u ORDER BY u.created_at DESC LIMIT 300`)).rows;
-    res.render('admin/users', { title: 'Админ · пользователи', users });
-  } catch (err) { next(err); }
-});
-
-app.post('/admin/users/:id', requireAdmin, writeLimiter, async (req, res, next) => {
-  try {
-    if (Number(req.params.id) === Number(req.user.id)) { flash(req, 'error', 'Нельзя заблокировать собственный аккаунт.'); return res.redirect('/admin/users'); }
-    if (req.body.action === 'ban') await q('UPDATE users SET is_banned=NOT is_banned WHERE id=$1', [req.params.id]);
-    if (req.body.action === 'admin') await q("UPDATE users SET role=CASE WHEN role='admin' THEN 'user' ELSE 'admin' END WHERE id=$1", [req.params.id]);
-    res.redirect('/admin/users');
-  } catch (err) { next(err); }
-});
-
-app.get('/admin/reports', requireAdmin, async (req, res, next) => {
-  try {
-    const reports = (await q(`SELECT r.*,u.username AS reporter FROM reports r LEFT JOIN users u ON u.id=r.reporter_id ORDER BY r.status ASC,r.created_at DESC LIMIT 300`)).rows;
-    res.render('admin/reports', { title: 'Админ · жалобы', reports });
-  } catch (err) { next(err); }
-});
-
-app.post('/admin/reports/:id/close', requireAdmin, writeLimiter, async (req, res, next) => {
-  try { await q("UPDATE reports SET status='closed' WHERE id=$1", [req.params.id]); res.redirect('/admin/reports'); }
-  catch (err) { next(err); }
-});
-
-// SOCKETS
-io.on('connection', (socket) => {
-  const userId = socket.request.session && socket.request.session.userId;
-  if (userId) socket.join(`user:${userId}`);
-  socket.on('watch_cv', (cvId) => {
-    const id = String(cvId || '').replace(/[^0-9]/g, '');
-    if (id) socket.join(`cv:${id}`);
-  });
-});
-
-app.use((req, res) => res.status(404).render('error', { title: '404', message: 'Такой страницы нет.' }));
-app.use((err, req, res, _next) => {
+app.use((err,req,res,next)=>{
   console.error(err);
-  if (err instanceof multer.MulterError || /Поддерживаются/.test(err.message || '')) {
-    flash(req, 'error', err.message || 'Ошибка загрузки файла.');
-    return res.redirect(req.get('referer') || '/');
-  }
-  res.status(500).render('error', { title: 'Ошибка', message: isProduction ? 'Что-то сломалось. Попробуйте ещё раз.' : err.message });
+  res.status(500).json({error:"server_error"});
 });
 
-(async () => {
-  try {
-    if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL is required. Copy .env.example to .env and configure PostgreSQL.');
-    await initDb();
-    const hours = Math.max(1, Number(process.env.JOB_IMPORT_INTERVAL_HOURS || 6));
-    setInterval(importAllJobs, hours * 60 * 60 * 1000).unref();
-    server.listen(PORT, () => {
-      console.log(`${SITE_NAME} → ${BASE_URL}`);
-      importAllJobs().catch(err => console.error('[jobs] background import failed:', err.message));
-    });
-  } catch (err) {
-    console.error('Startup failed:', err);
-    process.exit(1);
-  }
-})();
+initDb().then(()=>{
+  setInterval(reminderSweep,60000);
+  reminderSweep();
+  app.listen(PORT,()=>console.log(`CONSTELLATION on ${PORT}`));
+}).catch(e=>{console.error(e);process.exit(1)});
