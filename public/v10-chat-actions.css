@@ -1,0 +1,27 @@
+/* CONSTELLATION V10 chat actions */
+
+.msgActionButton{position:absolute;top:7px;right:8px;z-index:2;border:0;background:rgba(0,0,0,.08);color:inherit;border-radius:999px;min-width:28px;height:24px;padding:0 7px;display:grid;place-items:center;font:800 12px/1 system-ui,sans-serif;letter-spacing:.04em;opacity:0;cursor:pointer;transition:opacity .14s ease,background .14s ease,transform .14s ease}
+.msg.me:hover .msgActionButton,.msg.me:focus-within .msgActionButton{opacity:.75}
+.msgActionButton:hover{opacity:1!important;background:rgba(0,0,0,.14);transform:translateY(-1px)}
+body.after .msgActionButton{background:rgba(255,255,255,.12)}
+body.after .msgActionButton:hover{background:rgba(255,255,255,.2)}
+
+.v10MessageMenu{display:block!important;width:min(398px,calc(100vw - 20px));padding:8px}
+.v10MessageMenu .reactionChoices{display:grid;grid-template-columns:repeat(10,1fr);gap:3px}
+.v10MessageMenu .reactionChoice{width:100%!important;min-width:0;height:36px!important;padding:0!important;border-radius:11px!important;font-size:20px!important;font-family:"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif!important;line-height:1!important}
+.messageMenuDivider{height:1px;background:rgba(255,255,255,.12);margin:7px 2px}
+.v10MessageMenu .messageDeleteAction{width:100%!important;height:38px!important;display:flex!important;align-items:center!important;justify-content:space-between!important;padding:0 11px!important;border-radius:11px!important;color:#ff7b7b!important;background:transparent!important;font:750 12px/1 system-ui,sans-serif!important;text-align:left!important}
+.v10MessageMenu .messageDeleteAction:hover{background:rgba(255,80,80,.12)!important;transform:none!important}
+.v10MessageMenu .messageDeleteAction b{font-size:17px;font-weight:500}
+
+.deleteMessageDialog h2{font-size:32px;margin:7px 0 8px}
+.deleteMessageDialog>p{max-width:560px;line-height:1.5}
+.deleteMessageChoices{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px}
+.deleteMessageChoices .btn{flex:1;min-width:180px}
+.cancelDeleteMessage{margin-top:10px}
+
+@media(max-width:720px){
+  .msgActionButton{opacity:.62}
+  .v10MessageMenu .reactionChoices{grid-template-columns:repeat(5,1fr)}
+  .v10MessageMenu{width:min(260px,calc(100vw - 18px))}
+}
